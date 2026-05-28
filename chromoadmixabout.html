@@ -117,8 +117,8 @@
 
   <h2>Stability</h2>
   <p>
-    Stability is the chart's Y-axis. It measures raw chromosome-level smoothness
-    from the coefficient of variation:
+    Stability is the chart's default Y-axis. It measures raw chromosome-level
+    smoothness from the coefficient of variation:
   </p>
   <div class="math-block">
     \[
@@ -147,6 +147,7 @@
     smoother than expected for the component's Mean; negative residuals are
     spikier than expected. With fewer than four usable population rows, the tool
     falls back to raw Stability because the regression is not stable enough.
+    Residual Stability can also be selected as the chart's Y-axis.
   </p>
 
   <h2>Sparsity</h2>
@@ -189,16 +190,41 @@
     \[
       \begin{cases}
         x = \mathrm{Pulse\ Score} \\\\
-        y = \mathrm{Stability\ Score} \\\\
+        y = \mathrm{Stability\ Score\ or\ Residual\ Stability\ Score} \\\\
         \mathrm{bubble\ size} = \mathrm{Mean} \\\\
         \mathrm{color} = \mathrm{Sparsity\ Score}
       \end{cases}
     \]
   </div>
   <p>
-    Residual Stability is shown in the tables and hover text as a mean-adjusted
-    diagnostic. The plot pads the axes and allows labels to render beyond the
-    axis box so edge points are less likely to be clipped.
+    The Y-axis control switches between raw Stability Score and Residual
+    Stability Score. The label controls can show all labels, hide labels, or show
+    labels only above the low-signal cutoff. Components below that cutoff are
+    drawn as open circles. The chart can also filter by minimum Mean, show only
+    the largest Mean components, display optional quadrant hints, and export a
+    higher-resolution PNG. The plot pads the axes and allows labels to render
+    beyond the axis box so edge points are less likely to be clipped.
+  </p>
+
+  <h2>Encrypted Workspace Files</h2>
+  <p>
+    Workspace saving is manual. The app does not autosave, and it does not store
+    workspaces in localStorage, sessionStorage, or IndexedDB. When you choose
+    <strong>Save Workspace</strong>, the app downloads a visible
+    <code>.chromoworkspace</code> file.
+  </p>
+  <p>
+    The workspace payload includes parsed results, analysis settings, chart
+    settings, the workspace name, and optionally the raw pasted GEDmatch text.
+    Raw input is included only when <strong>Include raw paste</strong> is enabled;
+    parsed results are saved either way.
+  </p>
+  <p>
+    Workspace contents are encrypted in the browser using AES-GCM with a
+    256-bit key derived from the passphrase using PBKDF2-HMAC-SHA-256 with
+    650,000 iterations. Each save uses a fresh random salt and IV. Wrong
+    passphrases or tampered files fail to decrypt. The app cannot recover a
+    forgotten passphrase.
   </p>
 
   <h2>Uses and Limitations</h2>
@@ -222,4 +248,3 @@
   </p>
 </body>
 </html>
-
