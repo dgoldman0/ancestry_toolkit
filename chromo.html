@@ -843,20 +843,26 @@
 
     function renderTables(parsed){
       const {header, data, keptCount, scoreHeader, scoreRows} = parsed;
-      // Always render plain tables first
+
+      // DataTables keeps its own DOM bookkeeping. Destroy existing instances
+      // before replacing table HTML, otherwise the destroy path can erase the
+      // freshly rendered rows during kit switches and re-processing.
+      if(hasDT()){
+        const $ = window.jQuery;
+        if($.fn.DataTable.isDataTable('#resultTable')){
+          $('#resultTable').DataTable().clear().destroy();
+        }
+        if($.fn.DataTable.isDataTable('#scoreTable')){
+          $('#scoreTable').DataTable().clear().destroy();
+        }
+      }
+
+      // Always render plain tables first; enhance with DataTables when present.
       renderPlainTable('#resultTable', header, data);
       renderPlainTable('#scoreTable', scoreHeader, scoreRows);
 
-      // Enhance with DataTables if available
       if(!hasDT()) return; // graceful basic mode
       const $ = window.jQuery;
-
-      if($.fn.DataTable.isDataTable('#resultTable')){
-        $('#resultTable').DataTable().clear().destroy();
-      }
-      if($.fn.DataTable.isDataTable('#scoreTable')){
-        $('#scoreTable').DataTable().clear().destroy();
-      }
 
       // Percent columns: Top-n/Max, Mean, and chromosome columns.
       const pctColsMain = [5,6, ...Array.from({length: keptCount}, (_,k)=>9+k)];
