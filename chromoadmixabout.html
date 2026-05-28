@@ -209,9 +209,14 @@
   <h2>Encrypted Workspace Files</h2>
   <p>
     Workspace saving is manual. The app does not autosave, and it does not store
-    workspaces in localStorage, sessionStorage, or IndexedDB. When you choose
-    <strong>Save Workspace</strong>, the app downloads a visible
-    <code>.chromoworkspace</code> file. A workspace can hold multiple kits.
+    workspaces in localStorage, sessionStorage, or IndexedDB. A workspace can
+    hold multiple kits in a visible <code>.chromoworkspace</code> file.
+  </p>
+  <p>
+    In browsers with file-handle support, <strong>Open Workspace</strong> and
+    <strong>Save As</strong> associate the current workspace with that file, so
+    later <strong>Save</strong> writes back to it without opening another file
+    picker. Other browsers fall back to encrypted downloads.
   </p>
   <p>
     The workspace payload includes the workspace name, the active kit, and each
