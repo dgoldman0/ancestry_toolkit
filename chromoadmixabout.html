@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>About – Pulse & Stability Scores</title>
+  <!-- KaTeX CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <!-- KaTeX JS -->
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body);"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f9fafb;
+      color: #1f2937;
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1, h2, h3 {
+      font-weight: 600;
+      color: #111827;
+    }
+    h1 { font-size: 2rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.5rem; margin-top: 2rem; }
+    h3 { font-size: 1.2rem; margin-top: 1rem; }
+    p { margin-bottom: 1rem; }
+    .math-block {
+      background: #fff;
+      padding: 0.8rem 1rem;
+      margin: 1rem 0;
+      border-left: 4px solid #3b82f6;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>About the Pulse & Stability Scores</h1>
+
+  <p>
+    Human genomes are mosaics of ancestry. Chromosomes are inherited in blocks
+    that get broken down by recombination each generation. Admixture analysis
+    tries to detect what proportion of DNA in a person traces back to different
+    reference populations. Projects like <strong>Eurogenes</strong> (and other
+    calculators built on ADMIXTURE or similar software) attempt to quantify this.
+  </p>
+
+  <p>
+    Traditionally, admixture is summarized as a single proportion per population
+    (e.g. “20% North Atlantic”). But we can also look <em>chromosome by chromosome</em>,
+    which reveals finer structure — a recent migrant ancestor may leave a long block
+    of unusual ancestry on just one chromosome. The drawback is data explosion:
+    instead of one number per population, you now have 22 numbers per population.
+    The Pulse and Stability Scores were designed to distill this into interpretable
+    measures of admixture dynamics.
+  </p>
+
+  <h2>Why Chromosome-Level Matters</h2>
+  <p>
+    - <strong>Recent admixture</strong>: produces spikes on a few chromosomes,
+    since recombination has not had time to evenly spread ancestry.
+    <br>
+    - <strong>Ancient or continuous admixture</strong>: produces a smoother,
+    more stable distribution across chromosomes.
+  </p>
+  <p>
+    This is the intuition: <strong>Pulse</strong> captures short-term “shock”
+    admixture, while <strong>Stability</strong> captures long-term background mixing.
+  </p>
+
+  <h2>Weighted Mean and Variance</h2>
+  <p>
+    Chromosomes differ in length. Short ones swing more by chance. We correct
+    for this by weighting by SNP counts (as a proxy for length):
+  </p>
+  <div class="math-block">
+    \[
+      W = \sum_{i=1}^{22} w_i,\quad
+      \mu_w = \frac{\sum_i w_i x_i}{W},\quad
+      \mathrm{Var}_w = \frac{\sum_i w_i(x_i - \mu_w)^2}{W}
+    \]
+  </div>
+  <p>
+    where \(x_i\) is the percentage for chromosome \(i\), and \(w_i\) is its SNP count.
+  </p>
+
+  <h2>Adjusted Chromosomal Spike</h2>
+  <p>
+    Sometimes a single chromosome has a very large admixture hit against a given population, even though though there's little to no overlap identified on other chromosomes. To see if one chromosome has an unusually high ancestry proportion, we rescale
+    each chromosome’s deviation by its relative SNP count:
+  </p>
+  <div class="math-block">
+    \[
+      \bar{w} = \frac{1}{22}\sum_i w_i,\quad
+      \Delta_i = (x_i - \mu_w)\sqrt{\tfrac{w_i}{\bar{w}}}
+    \]
+  </div>
+  <p>
+    Then we define the adjusted maximum and the adjusted spike, which indicates an unusually high admixture in one chromosome against the rest for the population:
+  </p>
+  <div class="math-block">
+    \[
+      \mathrm{Max}_{\text{adj}} = \mu_w + \max_i \Delta_i,\quad
+      R_{\text{adj}} = \frac{\mathrm{Max}_{\text{adj}}}{\mu_w}
+    \]
+  </div>
+
+  <h2>Theory of the Pulse Metric</h2>
+  <p>
+    The spike value could be used by itself, however the presence of a spike is more meaningful if it likely occurred recently. Suppose an admixture event occurred \(t\) generations ago. Each generation,
+    recombination roughly <em>halves</em> the size of ancestry blocks. That means
+    the chance of finding a large contiguous block (a big spike on one chromosome)
+    decreases by about a factor of two each generation.
+  </p>
+  <p>
+    To capture this intuition, we divide the adjusted spike ratio by a
+    <strong>logarithmic time proxy</strong>:
+  </p>
+  <div class="math-block">
+    \[
+      \mathrm{Pulse}_w = \frac{R_{\text{adj}}}{\log_2\!\left(\tfrac{100}{\mu_w}\right)}
+    \]
+  </div>
+  <p>
+    - The numerator says: how much bigger is the spikiest chromosome than the mean? <br>
+    - The denominator \(\log_2(100/\mu_w)\) acts as a stand-in for “how many
+    generations ago did this admixture likely occur?” because small overall
+    means correspond to more distant events, and halving per generation
+    naturally gives a log base 2.
+  </p>
+
+  <h2>Theory of the Stability Metric</h2>
+  <p>
+    Stability measures how smooth the ancestry is distributed across
+    chromosomes. If a population has been present in the lineage for many
+    generations, variation will be low relative to the mean. If it only
+    recently entered, variance will be higher.
+  </p>
+  <div class="math-block">
+    \[
+      \mathrm{Stability}_w = \frac{\mu_w}{\mathrm{Var}_w + 0.1} \times 100
+    \]
+  </div>
+  <p>
+    Here the mean is the “signal,” and the variance is the “noise.”
+    The constant 0.1 prevents instability when variance is tiny.
+  </p>
+
+  <h2>Box–Cox Standardization</h2>
+  <p>
+    Raw values of Pulse and Stability are skewed. To compare across regions,
+    we use the Box–Cox transformation, which finds a power \(\lambda\) that
+    makes the distribution closer to normal, then z-scores:
+  </p>
+  <div class="math-block">
+    \[
+      y_\lambda(x) =
+      \begin{cases}
+        \tfrac{x^\lambda - 1}{\lambda}, & \lambda \neq 0 \\\\
+        \ln(x), & \lambda = 0
+      \end{cases}
+      ,\quad
+      z = \frac{y_\lambda(x) - \overline{y_\lambda}}{\mathrm{SD}(y_\lambda)}
+    \]
+  </div>
+  <p>
+    This yields final standardized <strong>Pulse Score</strong> and
+    <strong>Stability Score</strong>.
+  </p>
+
+  <h2>Uses and Limitations</h2>
+  <p>
+    - <strong>Uses</strong>: Helps highlight whether a population’s ancestry
+    in an individual reflects a deep stable background (high stability),
+    a sharp pulse-like event (high pulse), or just noise (low both). This can
+    contextualize results from calculators like Eurogenes K36.  
+    - <strong>Limitations</strong>: Reference datasets are imperfect,
+    ancestry proportions are estimates not absolutes, and statistical noise
+    is unavoidable. Chromosome-by-chromosome analysis adds detail but also
+    variability — hence the need for aggregate scores.
+  </p>
+
+  <p>
+    In short, Pulse and Stability Scores turn a very large table of
+    per-chromosome admixture values into interpretable signals of ancestry
+    dynamics: was this lineage shaped by deep, continuous mixing, or by
+    a more recent, punctuated pulse?
+  </p>
+</body>
+</html>
+
+

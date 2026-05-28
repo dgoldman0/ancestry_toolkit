@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gedmatch → Clean Table</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- DataTables + Buttons CSS -->
+  <link href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
+  <style>
+    body{background:#f7f8fb}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+    table.dataTable thead th, table.dataTable tbody td{white-space:nowrap;text-align:center}
+    #status.badge{font-size:.85rem}
+    .small-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.85rem}
+  </style>
+  <!-- Plotly for the scatter plot -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+</head>
+<body>
+  <div class="container py-5">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h1 class="mb-0 text-center flex-grow-1">Gedmatch Data Formatter</h1>
+      <span id="status" class="badge text-bg-warning ms-3">Libraries: initializing…</span>
+    </div>
+    <p class="text-center text-muted mb-4">Paste the raw table exactly as Gedmatch provides (with the offset “Chr--> 1” header and spacer columns).</p>
+
+    <!-- Controls -->
+    <div class="row g-3 align-items-end mb-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold" for="inputData">Paste data</label>
+        <textarea id="inputData" rows="10" class="form-control mono" placeholder="Paste the Gedmatch table here..."></textarea>
+      </div>
+      <div class="col-md-6">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-semibold">Aggregation</label>
+            <div class="input-group">
+              <span class="input-group-text">Top-n Mean</span>
+              <input id="nInput" type="number" class="form-control" value="1" min="1" step="1" />
+              <span class="input-group-text">n</span>
+            </div>
+            <div class="form-text">n-mean is the average of the top n chromosome values per row. n=1 equals Max.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold d-block">Weighting</label>
+            <div class="btn-group" role="group" aria-label="Weighting">
+              <input type="radio" class="btn-check" name="weighting" id="unweighted" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="unweighted">Unweighted</label>
+
+              <input type="radio" class="btn-check" name="weighting" id="weighted" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="weighted">Weighted (by SNP counts)</label>
+            </div>
+            <div class="form-text">When enabled, means and CV use SNP counts per chromosome as weights; Top-n uses weighted averaging over the top n values.</div>
+          </div>
+          <div class="col-12 d-flex gap-2">
+            <button id="processBtn" class="btn btn-primary flex-fill">Process Data</button>
+            <button id="clearBtn" class="btn btn-outline-secondary">Clear</button>
+            <button id="testBtn" class="btn btn-outline-info">Run Tests</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table id="resultTable" class="table table-striped table-bordered w-100 mb-3">
+        <thead></thead><tbody></tbody>
+      </table>
+    </div>
+
+    <h5 class="mt-4">Region Scores (Box–Cox z-standardized)</h5>
+    <div class="table-responsive">
+      <table id="scoreTable" class="table table-striped table-bordered w-100">
+        <thead></thead><tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Scatter Plot: Pulse Score (x) vs Stability Score (y) -->
+    <h5 class="mt-4">Visual Analysis</h5>
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <div id="scorePlot" style="width:100%;height:600px"></div>
+        <div class="form-text">Larger circles indicate higher overall mean admixture. Blue points indicate low sparcity (many of the chromosomes have a high percentage and few are empty), and red indicates high sparcity. Upper left quadrant indicates deep ancestry, whether recent or not. Lower left quadrant is likely noise. Lower right quandrant indicates mild potential crossover. Upper right quadrant indicates recent admixture event amplifying basal ancestry.</div>
+      </div>
+    </div>
+  <!-- Documentation-->
+  <h5 class="mt-4">About This Tool</h5>
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <p>
+        Gedmatch offers access to a number of admixture calculators. These calculators come in a few different modes. The most straightforward mode just gives just the proportions by population. These calculators are under the proportion mode are the easiest to use and are useful in testing broad theories about personal ancestry. They offer little in the way of testing more complex theories such as timing and type of admixture events. The chromosome stratified admixture output mode offers chromosome by chromosome admixture breakdown, but creates 22 data points per population, which is too many.
+      </p>
+      <p>
+        This tool takes the chromosome stratified admixture output and distills it into a few key metrics that summarize the <em>dynamics</em> of ancestry contributions across the genome. At its core, it treats each chromosome’s percentage as a random variable shaped by admixture history, recombination, and drift. The result is a compact summary of how ancestry from a given source is distributed across chromosomes, and how this compares to other populations in the dataset. The tool is a work in progress and should be used with caution and in conjunction with other lines of evidence. There are still plenty of open questions about interpretations of different patterns, especially in complex admixture scenarios.
+      </p>
+
+      <h6 class="mt-4">Parameters</h6>
+      <ul>
+        <li><strong>Top-n Mean</strong>: controls how much emphasis is placed on the largest chromosome values. Small <em>n</em> highlights isolated tracts (sensitive to very recent admixture), while larger <em>n</em> captures broad elevation across the genome.</li>
+        <li><strong>Weighting</strong>: when enabled, per-chromosome percentages are scaled by SNP counts (a proxy for genetic length). This brings the statistics closer to theoretical expectations where variance shrinks with chromosome length and tract count.</li>
+      </ul>
+
+      <h6 class="mt-4">Returned Metrics</h6>
+      <p>
+        For each population, the tool computes:
+      </p>
+      <ul>
+        <li><strong>Mean (%)</strong>: overall ancestry share across chromosomes, analogous to admixture proportion.</li>
+        <li><strong>Pulse</strong>: how concentrated the ancestry is on top chromosomes relative to what would be expected given the mean. It divides the “spikiness” (Top-n / Mean) by <code>log2(100 / Mean)</code>, which acts like a halving clock under simple dilution models.</li>
+        <li><strong>Stability</strong>: the ratio of mean to coefficient of variation, reflecting how evenly ancestry is spread across chromosomes. Higher values indicate smoother distributions shaped by many tracts and longer diffusion times.</li>
+        <li><strong>Sparsity</strong>: a normalized measure of whether ancestry mass is concentrated on few chromosomes (high sparsity) or spread broadly (low sparsity). Founder events and bottlenecks drive sparsity upward; broad admixture lowers it.</li>
+      </ul>
+
+      <h6 class="mt-4">Standardized Scores & Chart</h6>
+      <p>
+        To make different populations comparable within a run, each metric is Box–Cox transformed and standardized into a z-score:
+      </p>
+      <ul>
+        <li><strong>Pulse Score (z)</strong> → plotted on the X-axis: higher values mean stronger top-heavy concentration after adjusting for mean.</li>
+        <li><strong>Stability Score (z)</strong> → plotted on the Y-axis: higher values mean more even distribution across chromosomes.</li>
+        <li><strong>Sparsity Score (z)</strong> → encoded in bubble color: blue = denser, black = average, red = concentrated on few chromosomes.</li>
+        <li><strong>Mean (%)</strong> → sets bubble area: larger bubbles represent greater total ancestry share.</li>
+      </ul>
+      <p>
+        The scatter plot thus encodes each ancestry component as a four-tuple (<em>x</em>=Pulse Score, <em>y</em>=Stability Score, bubble size=Mean, bubble color=Sparsity Score). Quadrant positions suggest admixture dynamics:
+        upper-right = recent amplification of a broad ancestry, lower-right = narrow, recent contribution, upper-left = old diffuse background, lower-left = minimal/noise-level signal.
+      </p>
+
+      <h6 class="mt-4">Theoretical Interpretation</h6>
+      <p>
+        In population genetic terms, admixture tracts follow an exponential length distribution with mean length inversely
+        proportional to generations since admixture. Over time, recombination breaks donor tracts into many small fragments,
+        lowering between-chromosome variance and reducing sparsity. Thus:
+      </p>
+      <ul>
+        <li><strong>Recent pulses</strong> → high Pulse, often high Sparsity (few long tracts stand out).</li>
+        <li><strong>Older admixture</strong> → moderate Pulse, high Stability, low Sparsity (ancestry diffused across the genome).</li>
+        <li><strong>Founder effects / bottlenecks</strong> → elevate Sparsity even when Mean is large, since the same regions are repeatedly inherited.</li>
+        <li><strong>Broad-source admixture</strong> → suppresses Sparsity, since many donor lineages contribute segments across chromosomes.</li>
+      </ul>
+
+      <h6 class="mt-4">Limitations</h6>
+      <ul>
+        <li>Scores are standardized within the dataset, so interpretation is relative, not absolute.</li>
+        <li>Pulse is normalized by a theoretical halving clock but does not literally date admixture events.</li>
+        <li>Weighting by SNP counts approximates genetic length but is imperfect; true recombination maps would refine estimates.</li>
+        <li>Signals in closely related reference populations can move together; interpretation must consider correlated ancestry panels.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- JS libs (deferred where possible) -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js" defer></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js" defer></script>
+
+  <script>
+    // ---------- Utilities (vanilla; no jQuery required) ----------
+    function smartSplit(line){
+      if(line.includes("\t")) return line.split("\t");
+      return line.split(/ {2,}/);
+    }
+    const cleanToken = t => (t ?? "").trim();
+
+    function asPercentDisplay(x){
+      if(!x || x === "-") return "0%";
+      return x.includes("%") ? x.trim() : (x.trim() + "%");
+    }
+    const pctToNum = p => {
+      const n = parseFloat(String(p).replace("%",""));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    // small epsilon to avoid division by zero in Stability / Pulse
+    const EPS = 0;
+
+    // Box–Cox: returns {lambda, z}
+    function boxCoxZ(values){
+      const n = values.length;
+      if(n === 0) return {lambda: 1, z: []};
+      // Ensure strictly positive via shift
+      const minV = Math.min(...values);
+      const shift = (minV <= 0) ? (-minV + EPS) : 0;
+      const y = values.map(v => v + shift);
+      const sumLogY = y.reduce((a,b)=>a+Math.log(b),0);
+
+      function transform(y, lambda){
+        if(Math.abs(lambda) < 1e-12) return y.map(v=>Math.log(v));
+        return y.map(v => (Math.pow(v, lambda) - 1)/lambda);
+      }
+      function mean(arr){ return arr.reduce((a,b)=>a+b,0)/arr.length; }
+
+      let bestL = 1, bestLL = -Infinity;
+      // Coarse grid then fine grid
+      for(let L=-5; L<=5; L+=0.05){
+        const t = transform(y, L);
+        const m = mean(t);
+        const sse = t.reduce((a,b)=>a+Math.pow(b-m,2),0);
+        const ll = -(n/2)*Math.log(sse/n) + (L-1)*sumLogY; // profile log-likelihood
+        if(ll > bestLL){ bestLL = ll; bestL = L; }
+      }
+      const start = bestL - 0.05, end = bestL + 0.05, step = 0.005;
+      for(let L=start; L<=end; L+=step){
+        const t = transform(y, L);
+        const m = mean(t);
+        const sse = t.reduce((a,b)=>a+Math.pow(b-m,2),0);
+        const ll = -(n/2)*Math.log(sse/n) + (L-1)*sumLogY;
+        if(ll > bestLL){ bestLL = ll; bestL = L; }
+      }
+      const T = transform(y, bestL);
+      const mT = mean(T);
+      const sdT = Math.sqrt(T.reduce((a,b)=>a+Math.pow(b-mT,2),0) / (n || 1));
+      const z = T.map(v => (sdT === 0 ? 0 : (v - mT)/sdT));
+      return {lambda: bestL, z};
+    }
+
+    // Yeo–Johnson: returns { lambda, z }
+    // Might be important in the future... but Box–Cox suffices for now.
+    // - values: Array<number>
+    // - Grid-search MLE for lambda, then standardize transformed values to z-scores.
+    function yeoJohnsonZ(values){
+      const n = values.length;
+      if(n === 0) return { lambda: 1, z: [] };
+
+      const TOL = 1e-12;
+
+      // Helpers
+      const mean = arr => arr.reduce((a,b)=>a+b,0) / (arr.length || 1);
+      const transformOne = (x, lambda) => {
+        if (x >= 0) {
+          if (Math.abs(lambda) < TOL) return Math.log(x + 1);
+          return (Math.pow(x + 1, lambda) - 1) / lambda;
+        } else {
+          if (Math.abs(lambda - 2) < TOL) return -Math.log(1 - x);
+          return - (Math.pow(1 - x, 2 - lambda) - 1) / (2 - lambda);
+        }
+      };
+      const transform = (arr, lambda) => arr.map(x => transformOne(x, lambda));
+
+      // Precompute Jacobian pieces for profile log-likelihood
+      let sumLogPos = 0, sumLogNeg = 0;
+      for (const x of values) {
+        if (x >= 0) sumLogPos += Math.log(x + 1);
+        else        sumLogNeg += Math.log(1 - x);
+      }
+
+      let bestL = 1, bestLL = -Infinity;
+
+      // Coarse grid search
+      for (let L = -5; L <= 5; L += 0.05) {
+        const t = transform(values, L);
+        const m = mean(t);
+        const sse = t.reduce((a,b)=>a + Math.pow(b - m, 2), 0);
+        const ll = -(n/2)*Math.log((sse/n) || TOL) + (L - 1)*sumLogPos + (1 - L)*sumLogNeg;
+        if (ll > bestLL) { bestLL = ll; bestL = L; }
+      }
+
+      // Fine search around bestL
+      const start = bestL - 0.05, end = bestL + 0.05, step = 0.005;
+      for (let L = start; L <= end; L += step) {
+        const t = transform(values, L);
+        const m = mean(t);
+        const sse = t.reduce((a,b)=>a + Math.pow(b - m, 2), 0);
+        const ll = -(n/2)*Math.log((sse/n) || TOL) + (L - 1)*sumLogPos + (1 - L)*sumLogNeg;
+        if (ll > bestLL) { bestLL = ll; bestL = L; }
+      }
+
+      // Final transform and z-standardization
+      const T = transform(values, bestL);
+      const mT = mean(T);
+      const sdT = Math.sqrt(T.reduce((a,b)=>a + Math.pow(b - mT, 2), 0) / (n || 1));
+      const z = sdT === 0 ? T.map(_ => 0) : T.map(v => (v - mT) / sdT);
+
+      return { lambda: bestL, z };
+    }
+
+    // --- SNP weight parsing + weighting helpers ---
+    function parseSnpWeightsLine(lines){
+      const snpLine = lines.find(l => /^Nbr\s*of\s*SNPs\s*eval:/i.test(l));
+      if(!snpLine) return null;
+      const parts = smartSplit(snpLine).map(cleanToken);
+
+      // Remove the label, drop spacer gaps (empty strings), coerce to ints
+      const nums = parts.slice(1)
+        .filter(t => t !== "")
+        .map(t => parseInt(String(t).replace(/,/g,''), 10))
+        .filter(n => Number.isFinite(n));
+
+      while(nums.length < 22) nums.push(0);
+      if(nums.length > 22) nums.length = 22;
+      return nums;
+    }
+
+    function weightedMean(values, weights){
+      const sumW = weights.reduce((a,b)=>a+b,0);
+      if(sumW <= 0) return values.reduce((a,b)=>a+b,0) / (values.length || 1);
+      return values.reduce((s,v,i)=>s + v * weights[i], 0) / sumW;
+    }
+
+    function weightedVariance(values, weights){
+      const sumW = weights.reduce((a,b)=>a+b,0);
+      if(sumW <= 0){
+        const m = values.reduce((a,b)=>a+b,0) / (values.length || 1);
+        return values.reduce((a,b)=>a + Math.pow(b - m, 2), 0) / (values.length || 1);
+      }
+      const mean = weightedMean(values, weights);
+      return values.reduce((acc, v, i) => acc + weights[i] * Math.pow(v - mean, 2), 0) / sumW;
+    }
+
+    function weightedSparsity(values, snpCount){
+      const n = values.length;
+
+      // Fractions of fullness
+      const fractions = values.map((val, i) => val / snpCount[i]);
+
+      // L1 and L2 norms
+      const l1 = fractions.reduce((a, b) => a + Math.abs(b), 0);
+      const l2 = Math.sqrt(fractions.reduce((a, b) => a + b*b, 0));
+
+      // Hoyer sparsity
+      const sparsity = (Math.sqrt(n) - (l1 / l2)) / (Math.sqrt(n) - 1);
+
+      return sparsity;
+    }
+
+
+    // Probably best to just have "calculateProperty" and then have a switch for weighted or not... Maybe...
+    function parseGedmatch(raw, opts={}){
+      const topN = Math.max(1, Math.floor(opts.topN ?? 1));
+      const weighted = !!opts.weighted;
+      const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
+
+      // Pull SNP weights aligned to chromosomes 1–22 (before spacer removal)
+      const snpWeightsAll = parseSnpWeightsLine(lines) || Array(22).fill(1);
+
+      // Find header row (starts with "Population")
+      const headerIdx = lines.findIndex(l => /^Population\b/i.test(l));
+      const dataLines = headerIdx >= 0 ? lines.slice(headerIdx + 1) : lines;
+
+      // Build rows: [label, ...values] while removing spacer columns
+      const rows = [];
+      for(const line of dataLines){
+        const parts = smartSplit(line).map(cleanToken);
+        if(parts.length === 0) continue;
+        const head = parts[0];
+
+        // Skip footer like "Nbr of SNPs eval:"
+        if(/^nbr\s*of\s*snps/i.test(head)) continue;
+
+        // Remove empty spacer tokens that Gedmatch inserts between columns
+        const noSpacers = parts.filter((t,i) => !(i>0 && t===""));
+
+        // First real token is population label; remainder are chromosome cells (with spacers removed)
+        const label = noSpacers[0];
+        const rawVals = noSpacers.slice(1);
+
+        // Coerce to exactly 22 value slots by padding/truncating after spacer removal
+        const vals = rawVals.map(asPercentDisplay);
+        while(vals.length < 22) vals.push("0%");
+        if(vals.length > 22) vals.length = 22;
+
+        // All-zero row check (after '-'→0%)
+        const nums = vals.map(pctToNum);
+        if(nums.every(v => v === 0)) continue;
+
+        rows.push({label, vals, nums});
+      }
+
+      // Drop all-zero columns across remaining rows
+      const keep = Array(22).fill(false);
+      rows.forEach(r => r.nums.forEach((v,i)=>{ if(v>0) keep[i]=true; }));
+      const keptIdx = keep.map((k,i)=>k?i:-1).filter(i=>i>=0);
+
+      // Align weights to kept columns
+      const wKept = keptIdx.map(i => Math.max(0, snpWeightsAll[i] || 0));
+      const sumWKept = wKept.reduce((a,b)=>a+b,0);
+
+      // Build display rows with stats and only kept columns
+      const calcRows = rows.map(r => {
+        const nums = keptIdx.map(i => r.nums[i]);
+        const percs = keptIdx.map(i => r.vals[i]);
+
+        // --- Unweighted baseline ---
+        const meanU = nums.reduce((a,b)=>a+b,0) / (nums.length || 1);
+        const varU  = nums.reduce((a,b)=>a + Math.pow(b - meanU, 2), 0) / (nums.length || 1);
+        const sdU   = Math.sqrt(varU);
+        const cvU   = meanU === 0 ? 0 : (sdU / meanU);
+
+        // Calculate Hoyer Sparsity
+        const n = nums.length;
+        // L1 norm (sum of absolute values, but nums are >=0 so just sum)
+        const l1 = nums.reduce((a, b) => a + Math.abs(b), 0);
+
+        // L2 norm (square root of sum of squares)
+        const l2 = Math.sqrt(nums.reduce((a, b) => a + b*b, 0));
+
+        // Hoyer sparsity
+        const sparsityU = (Math.sqrt(n) - (l1 / l2)) / (Math.sqrt(n) - 1);
+
+        const topSorted = [...nums].sort((a,b)=>b-a);
+        const nActual   = Math.min(topN, topSorted.length || 1);
+        const topMeanU  = topSorted.slice(0, nActual).reduce((a,b)=>a+b,0) / nActual;
+
+        // --- Weighted counterparts (by SNP counts) ---
+        let mean = meanU, sd = sdU, cv = cvU, topMean = topMeanU, sparsity = sparsityU;
+
+        if(weighted && sumWKept > 0){
+          mean = weightedMean(nums, wKept);
+          const varW = weightedVariance(nums, wKept);
+          sd = Math.sqrt(varW);
+          cv = mean === 0 ? 0 : (sd / mean);
+          sparsity = weightedSparsity(nums, wKept);
+
+          // Weighted Top-n mean: pick top n by value, then weight by SNPs within that subset
+          const pairs = nums.map((v,i)=>({ v, w: wKept[i] })).sort((a,b)=>b.v - a.v);
+          const topPairs = pairs.slice(0, nActual);
+          const sumWTop  = topPairs.reduce((s,p)=>s + p.w, 0);
+          topMean = sumWTop > 0
+            ? topPairs.reduce((s,p)=>s + p.v * p.w, 0) / sumWTop
+            : topPairs.reduce((s,p)=>s + p.v, 0) / nActual;
+        }
+
+        // Derived metrics (shared)
+        const spike = (topMean / (mean || EPS));
+        const denom = Math.log2(100 / (mean || EPS)) + EPS;
+        const pulse = (spike / denom);
+        const stability = (mean / (cv + EPS));
+
+        return {
+          label: r.label,
+          nums, percs, mean, cv, topMean, spike, pulse, stability, sparsity
+        };
+      });
+
+      // Header: Population, Top-n Mean/Max, Mean, CV, Spike, Pulse, Stability, Chr 1..N (renumbered cleanly)
+      const extremaLabel = (topN === 1) ? "Max" : `Top-${topN} Mean`;
+      const header = ["Population", "Pulse", "Stability", "Sparsity", extremaLabel, "Mean", "CV", "Spike"];
+      for(let i=1;i<=keptIdx.length;i++) header.push(`Chr ${i}`);
+
+      // Scores sheet (Box–Cox z of Pulse and Stability)
+      const pulseVals = calcRows.map(r=>r.pulse);
+      const stabVals = calcRows.map(r=>r.stability);
+      const {lambda: lamPulse, z: zPulse} = boxCoxZ(pulseVals);
+      const {lambda: lamStab, z: zStab}   = boxCoxZ(stabVals);
+      const {lambda: lamSparsity, z: zSparsity} = boxCoxZ(calcRows.map(r=>r.sparsity));
+
+      // Table rows for main table
+      const outRows = calcRows.map(r => [
+        r.label,
+        (r.pulse / 2).toFixed(2),
+        r.stability.toFixed(2),
+        r.sparsity.toFixed(4),
+        r.topMean.toFixed(2)+"%",
+        r.mean.toFixed(2)+"%",
+        r.cv.toFixed(2),
+        r.spike.toFixed(2),
+        ...keptIdx.map(i => r.percs[keptIdx.indexOf(i)])
+      ]);
+
+      const scoreHeader = ["Region", "Pulse Score", "Stability Score", "Sparsity Score"];
+      const scoreRows   = calcRows.map((r,idx)=>[
+        r.label,
+        zPulse[idx].toFixed(4),
+        zStab[idx].toFixed(4),
+        zSparsity[idx].toFixed(4)
+      ]);
+
+      return {
+        header, data: outRows, keptCount: keptIdx.length,
+        scoreHeader, scoreRows,
+        lambdas: {pulse: lamPulse, stability: lamStab}
+      };
+    }
+
+    // ---------- DataTables loader & safe wrappers ----------
+    function hasDT(){
+      return !!(window.jQuery && window.jQuery.fn && window.jQuery.fn.DataTable);
+    }
+
+    function updateStatus(msg, cls){
+      const el = document.getElementById('status');
+      if(!el) return;
+      el.textContent = msg;
+      el.className = 'badge ' + (cls || 'text-bg-secondary');
+    }
+
+    function loadScript(src){
+      return new Promise((resolve, reject)=>{
+        const s=document.createElement('script');
+        s.src=src; s.defer=true; s.onload=resolve; s.onerror=reject; document.head.appendChild(s);
+      });
+    }
+
+    async function ensureDT(){
+      if(hasDT()){ updateStatus('Libraries: ready', 'text-bg-success'); return; }
+      try{
+        if(!window.jQuery){
+          updateStatus('Loading jQuery…', 'text-bg-warning');
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js');
+        }
+        if(!hasDT()){
+          updateStatus('Loading DataTables…', 'text-bg-warning');
+          await loadScript('https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js');
+          await loadScript('https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js');
+          await loadScript('https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js');
+          if(!window.JSZip){ await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'); }
+          await loadScript('https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js');
+        }
+        if(hasDT()) updateStatus('Libraries: ready', 'text-bg-success');
+        else updateStatus('Libraries: basic mode', 'text-bg-secondary');
+      }catch(e){
+        updateStatus('Libraries: basic mode', 'text-bg-secondary');
+      }
+    }
+
+    // ---------- Rendering ----------
+    function renderPlainTable(selector, header, data){
+      const thead = document.querySelector(selector + ' thead');
+      const tbody = document.querySelector(selector + ' tbody');
+      thead.innerHTML = '<tr>'+header.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+      tbody.innerHTML = data.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('');
+    }
+
+    function renderTables(parsed){
+      const {header, data, keptCount, scoreHeader, scoreRows} = parsed;
+      // Always render plain tables first
+      renderPlainTable('#resultTable', header, data);
+      renderPlainTable('#scoreTable', scoreHeader, scoreRows);
+
+      // Enhance with DataTables if available
+      if(!hasDT()) return; // graceful basic mode
+      const $ = window.jQuery;
+
+      if($.fn.DataTable.isDataTable('#resultTable')){
+        $('#resultTable').DataTable().clear().destroy();
+      }
+      if($.fn.DataTable.isDataTable('#scoreTable')){
+        $('#scoreTable').DataTable().clear().destroy();
+      }
+
+      // Percent columns for sorting in main: [1,2,3] and chromosome columns starting at 7
+      const pctColsMain = [1,2,3, ...Array.from({length: keptCount}, (_,k)=>7+k)];
+      const numColsMain = [4,5,6]; // Spike, Pulse, Stability
+
+      $('#resultTable').DataTable({
+        paging:true, searching:true, info:true, ordering:true, scrollX:true,
+        dom:'Bfrtip',
+        buttons:[
+          {extend:'csvHtml5', title:'gedmatch_clean'},
+          {extend:'excelHtml5', title:'gedmatch_clean'}
+        ],
+        columnDefs:[
+          {
+            targets: pctColsMain,
+            render: function(data, type){
+              if(type === 'sort' || type === 'type') return parseFloat(String(data).replace('%','')) || 0;
+              return data;
+            }
+          },
+          {
+            targets: numColsMain,
+            render: function(data, type){
+              if(type === 'sort' || type === 'type') return parseFloat(data) || 0;
+              return data;
+            }
+          }
+        ]
+      });
+
+      $('#scoreTable').DataTable({
+        paging:false, searching:true, info:true, ordering:true, scrollX:true,
+        dom:'Bfrtip',
+        buttons:[
+          {extend:'csvHtml5', title:'gedmatch_scores'},
+          {extend:'excelHtml5', title:'gedmatch_scores'}
+        ],
+        columnDefs:[
+          {
+            targets: [1,2],
+            render: function(data, type){
+              if(type === 'sort' || type === 'type') return parseFloat(data) || 0;
+              return data;
+            }
+          }
+        ]
+      });
+    }
+
+    // ---------- Scatter Plot Rendering ----------
+    function renderPlot(parsed){
+      const rows = parsed.scoreRows || [];
+      const regions = rows.map(r => r[0]);
+      const xAll = rows.map(r => parseFloat(r[1])); // Pulse Score (z)
+      const yAll = rows.map(r => parseFloat(r[2])); // Stability Score (z)
+
+      // Keep only finite points and remember their indices
+      const X = [], Y = [], T = [], idxs = [];
+      for(let i=0;i<regions.length;i++){
+        const xi = xAll[i], yi = yAll[i];
+        if(Number.isFinite(xi) && Number.isFinite(yi)){
+          X.push(xi); Y.push(yi); T.push(regions[i]); idxs.push(i);
+        }
+      }
+
+      // --- Use per-row Mean from parsed.data (col 5) to size bubbles ---
+      const allMeans = (parsed.data || []).map(row => {
+        const m = row?.[5] ?? "0%";               // "Mean" column in main table
+        return parseFloat(String(m).replace('%','')) || 0;
+      });
+      const sVals = idxs.map(i => Math.max(allMeans[i], 0.01)); // keep visible
+
+      // --- Use per row sparsity from parsed.data (col 3) to color bubbles. Since sparsity ranges from 0 to 1, we'll use 0.5 as black, 0 as bright blue, 1 as bright red ---
+      let allSparsity = (parsed.data || []).map(row => {
+        const s = row?.[3] ?? "0";               // "Sparsity" column in main table
+        return parseFloat(String(s)) || 0;
+      });
+
+      if (true) {
+        // Use box-cox sparsity instead, which is from rows (parsed.scoreRows col 3)
+        allSparsity = (parsed.scoreRows || []).map(row => {
+          const s = row?.[3] ?? "0";               // "Sparsity Score" column in scores table
+          return parseFloat(String(s)) || 0;
+        });
+      }
+
+      const spVals = idxs.map(i => allSparsity[i]);
+
+      // Store both as customdata
+      const customData = idxs.map(i => [sVals[idxs.indexOf(i)], spVals[idxs.indexOf(i)]]);
+
+      let cVals = idxs.map(i => {
+        const s = allSparsity[i];
+        if (s <= 0.5) {
+          // Blue to Black: s=0 → blue, s=0.5 → black
+          const t = s / 0.5;
+          const r = Math.round(0 * (1 - t) + 0 * t);
+          const g = Math.round(0 * (1 - t) + 0 * t);
+          const b = Math.round(255 * (1 - t) + 0 * t);
+          return `rgb(${r},${g},${b})`;
+        } else {
+          // Black to Red: s=0.5 → black, s=1 → red
+          const t = (s - 0.5) / 0.5;
+          const r = Math.round(0 * (1 - t) + 255 * t);
+          const g = Math.round(0 * (1 - t) + 0 * t);
+          const b = Math.round(0 * (1 - t) + 0 * t);
+          return `rgb(${r},${g},${b})`;
+        }
+      });
+
+      if (true) {
+        // Black is now 0, Blue is negative, Red is positive
+        const minS = Math.min(...spVals);
+        const maxS = Math.max(...spVals);
+        const range = Math.max(Math.abs(minS), Math.abs(maxS), 1);
+        cVals = spVals.map(s => {
+          if (s < 0) {
+            // Blue to Black: s=-range → blue, s=0 → black
+            const t = (s + range) / range;
+            const r = Math.round(0 * (1 - t) + 0 * t);
+            const g = Math.round(0 * (1 - t) + 0 * t);
+            const b = Math.round(255 * (1 - t) + 0 * t);
+            return `rgb(${r},${g},${b})`;
+          } else {
+            // Black to Red: s=0 → black, s=+range → red
+            const t = s / range;
+            const r = Math.round(0 * (1 - t) + 255 * t);
+            const g = Math.round(0 * (1 - t) + 0 * t);
+            const b = Math.round(0 * (1 - t) + 0 * t);
+            return `rgb(${r},${g},${b})`;
+          }
+        });
+      }
+
+      // Size so the largest bubble ≈ 40px diameter
+      const desiredMaxPx = 40;
+      const maxS = Math.max(...sVals, 1);
+      const sizeref = (2 * maxS) / (desiredMaxPx ** 2);
+
+      // Axis ranges (square)
+      const maxAbs = Math.max(1, ...X.map(Math.abs), ...Y.map(Math.abs));
+      const R = maxAbs * 1.1;
+
+      const trace = {
+        x: X,
+        y: Y,
+        text: T,
+        mode: 'markers+text',
+        type: 'scatter',
+        textposition: 'top center',
+        customdata: customData, // Mean for hover
+        marker: {
+          size: sVals,
+          sizemode: 'area',
+          sizeref,
+          sizemin: 6,
+          line: { width: 1 },
+          color: cVals // <-- color bubbles by sparsity
+        },
+        hovertemplate:
+          '<b>%{text}</b><br>' +
+          'Pulse: %{x:.3f}<br>' +
+          'Stability: %{y:.3f}<br>' +
+          'Sparsity: %{customdata[1]:.4f}<br>' +
+          'Mean: %{customdata[0]:.2f}%<extra></extra>'
+      };
+
+      const layout = {
+        title: 'Population Admixture Multimodal Analysis',
+        xaxis: { title: 'Pulse Score (z)', range: [-R, R], zeroline: false, mirror: true },
+        yaxis: { title: 'Stability Score (z)', range: [-R, R], zeroline: false, mirror: true},
+        margin: { l: 60, r: 40, t: 60, b: 60 },
+        shapes: [
+          { type: 'line', x0: -R, x1: R, y0: 0, y1: 0, line: { width: 1, dash: 'dot' } },
+          { type: 'line', x0: 0, x1: 0, y0: -R, y1: R, line: { width: 1, dash: 'dot' } }
+        ],
+        hovermode: 'closest'
+      };
+
+      const config = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['select2d','lasso2d'] };
+      if(window.Plotly && document.getElementById('scorePlot')){
+        Plotly.react('scorePlot', [trace], layout, config);
+      }
+    } 
+
+    // ---------- Actions ----------
+    async function doProcess(){
+      await ensureDT();
+      const raw = document.getElementById('inputData').value;
+      const n = Math.max(1, parseInt(document.getElementById('nInput').value || '1', 10));
+      const weighted = document.getElementById('weighted').checked;
+      const parsed = parseGedmatch(raw, { topN: n, weighted });
+      renderTables(parsed);
+      renderPlot(parsed);
+    }
+
+    async function doClear(){
+      await ensureDT();
+      document.getElementById('inputData').value = '';
+      if(hasDT()){
+        const $ = window.jQuery;
+        if($.fn.DataTable.isDataTable('#resultTable')) $('#resultTable').DataTable().clear().destroy();
+        if($.fn.DataTable.isDataTable('#scoreTable'))  $('#scoreTable').DataTable().clear().destroy();
+      }
+      document.querySelector('#resultTable thead').innerHTML = '';
+      document.querySelector('#resultTable tbody').innerHTML = '';
+      document.querySelector('#scoreTable thead').innerHTML = '';
+      document.querySelector('#scoreTable tbody').innerHTML = '';
+      if(window.Plotly){ Plotly.purge('scorePlot'); }
+    }
+
+    // ---------- Demo Tests ----------
+    function sampleData(){
+      return [
+        'Population  Chr--> 1  2  3  4  5  6',
+        'British      1.0%  2.0%  -   0.0%  3.0%  0.0%',
+        'Italian        -     -   5    0      -    1',
+        'Finnish      0.5   0.5   0.5  0.5    0.5  0.5',
+        'Basque         -     -    -    -     -    -',
+        // SNP counts line using Gedmatch-style spacer gaps (tabs with empty cells):
+        'Nbr of SNPs eval:\t\t7845\t\t7735\t\t6776\t\t5865\t\t6076\t\t6247'
+      ].join('\n');
+    }
+
+    async function runTests(){
+      const out = [];
+      // Test 1: Basic parsing and headers with n=1 -> label becomes Max
+      document.getElementById('inputData').value = sampleData();
+      document.getElementById('nInput').value = '1';
+      document.getElementById('unweighted').checked = true;
+      await doProcess();
+      const ths1 = Array.from(document.querySelectorAll('#resultTable thead th')).map(th=>th.textContent);
+      out.push('Test 1 header first columns: ' + ths1.slice(0,8).join(' | '));
+
+      // Test 2: n=3 should change label to Top-3 Mean and include Pulse column
+      document.getElementById('nInput').value = '3';
+      await doProcess();
+      const firstHeader = document.querySelector('#resultTable thead th:nth-child(2)').textContent;
+      const hasPulse = ths1.includes('Pulse');
+      out.push('Test 2 Top-n label: ' + firstHeader);
+      out.push('Test 2 Pulse present: ' + (hasPulse ? 'yes' : 'no'));
+
+      // Test 3: CV for uniform row (Finnish) should be ~0.00
+      const rows = Array.from(document.querySelectorAll('#resultTable tbody tr'));
+      const finnRow = rows.find(tr => tr.firstElementChild.textContent.trim() === 'Finnish');
+      const cvCell = finnRow ? finnRow.children[3].textContent.trim() : '(row missing)';
+      out.push('Test 3 Finnish CV: ' + cvCell);
+
+      // Test 4: Score table shape and z-score centering
+      const zh = Array.from(document.querySelectorAll('#scoreTable thead th')).map(th=>th.textContent);
+      out.push('Test 4 score header: ' + zh.join(' | '));
+      const zRows = Array.from(document.querySelectorAll('#scoreTable tbody tr'));
+      const pulseScores = zRows.map(tr => parseFloat(tr.children[1].textContent));
+      const meanZ = pulseScores.reduce((a,b)=>a+b,0)/(pulseScores.length||1);
+      out.push('Test 4 Pulse z-mean (approx 0): ' + meanZ.toFixed(3));
+
+      // Test 5: Weighted vs Unweighted Max should differ when SNP counts are uneven
+      document.getElementById('inputData').value = sampleData();
+      document.getElementById('nInput').value = '1';
+
+      document.getElementById('unweighted').checked = true;
+      await doProcess();
+      const maxUnw = document.querySelector('#resultTable tbody tr td:nth-child(2)').textContent;
+
+      document.getElementById('weighted').checked = true;
+      await doProcess();
+      const maxW = document.querySelector('#resultTable tbody tr td:nth-child(2)').textContent;
+
+      out.push('Test 5 Max (unweighted → weighted): ' + maxUnw + ' → ' + maxW);
+
+      document.getElementById('testOutput').textContent = out.join('\n');
+    }
+
+    // ---------- Wire up on DOM ready (vanilla) ----------
+    document.addEventListener('DOMContentLoaded', async ()=>{
+      updateStatus('Libraries: loading…', 'text-bg-warning');
+      ensureDT(); // kick off async loading
+      document.getElementById('processBtn').addEventListener('click', doProcess);
+      document.getElementById('clearBtn').addEventListener('click', doClear);
+      document.getElementById('testBtn').addEventListener('click', runTests);
+    });
+  </script>
+</body>
+</html>
+
