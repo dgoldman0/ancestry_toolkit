@@ -69,7 +69,7 @@
       </table>
     </div>
 
-    <h5 class="mt-4">Region Scores (Box–Cox z-standardized)</h5>
+    <h5 class="mt-4">Region Scores (Yeo-Johnson z-standardized)</h5>
     <div class="table-responsive">
       <table id="scoreTable" class="table table-striped table-bordered w-100">
         <thead></thead><tbody></tbody>
@@ -81,71 +81,82 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <div id="scorePlot" style="width:100%;height:600px"></div>
-        <div class="form-text">Larger circles indicate higher overall mean admixture. Blue points indicate low sparcity (many of the chromosomes have a high percentage and few are empty), and red indicates high sparcity. Upper left quadrant indicates deep ancestry, whether recent or not. Lower left quadrant is likely noise. Lower right quandrant indicates mild potential crossover. Upper right quadrant indicates recent admixture event amplifying basal ancestry.</div>
+        <div class="form-text">Larger circles indicate higher overall mean admixture. Blue points indicate low sparsity, black is near average, and red indicates high sparsity. Pulse marks excess top-chromosome concentration; Stability marks chromosome-level smoothness. Residual Stability is shown in the tables as a mean-adjusted diagnostic.</div>
       </div>
     </div>
+    <pre id="testOutput" class="small-mono bg-light border rounded p-2 d-none"></pre>
   <!-- Documentation-->
   <h5 class="mt-4">About This Tool</h5>
   <div class="card shadow-sm">
     <div class="card-body">
       <p>
-        Gedmatch offers access to a number of admixture calculators. These calculators come in a few different modes. The most straightforward mode just gives just the proportions by population. These calculators are under the proportion mode are the easiest to use and are useful in testing broad theories about personal ancestry. They offer little in the way of testing more complex theories such as timing and type of admixture events. The chromosome stratified admixture output mode offers chromosome by chromosome admixture breakdown, but creates 22 data points per population, which is too many.
+        GEDmatch admixture calculators can report a single overall proportion for each
+        population, but chromosome-by-chromosome output exposes how that signal is
+        distributed across the genome. This tool reduces those 22 chromosome values
+        into a small set of descriptive metrics.
       </p>
       <p>
-        This tool takes the chromosome stratified admixture output and distills it into a few key metrics that summarize the <em>dynamics</em> of ancestry contributions across the genome. At its core, it treats each chromosome’s percentage as a random variable shaped by admixture history, recombination, and drift. The result is a compact summary of how ancestry from a given source is distributed across chromosomes, and how this compares to other populations in the dataset. The tool is a work in progress and should be used with caution and in conjunction with other lines of evidence. There are still plenty of open questions about interpretations of different patterns, especially in complex admixture scenarios.
+        The metrics summarize between-chromosome distribution. They do not recover
+        tract length, exact admixture dates, or literal ancestry segments. They are
+        best read as exploratory signals that can be compared within a run and checked
+        against other evidence.
       </p>
 
       <h6 class="mt-4">Parameters</h6>
       <ul>
-        <li><strong>Top-n Mean</strong>: controls how much emphasis is placed on the largest chromosome values. Small <em>n</em> highlights isolated tracts (sensitive to very recent admixture), while larger <em>n</em> captures broad elevation across the genome.</li>
-        <li><strong>Weighting</strong>: when enabled, per-chromosome percentages are scaled by SNP counts (a proxy for genetic length). This brings the statistics closer to theoretical expectations where variance shrinks with chromosome length and tract count.</li>
+        <li><strong>Top-n Mean</strong>: controls how many of the largest chromosome values contribute to Pulse. <em>n=1</em> uses the maximum chromosome value.</li>
+        <li><strong>Weighting</strong>: when enabled, Mean, CV, and Top-n Mean use SNP counts as chromosome-length proxies. Sparsity remains based on the displayed chromosome percentages.</li>
       </ul>
 
       <h6 class="mt-4">Returned Metrics</h6>
-      <p>
-        For each population, the tool computes:
-      </p>
       <ul>
         <li><strong>Mean (%)</strong>: overall ancestry share across chromosomes, analogous to admixture proportion.</li>
-        <li><strong>Pulse</strong>: how concentrated the ancestry is on top chromosomes relative to what would be expected given the mean. It divides the “spikiness” (Top-n / Mean) by <code>log2(100 / Mean)</code>, which acts like a halving clock under simple dilution models.</li>
-        <li><strong>Stability</strong>: the ratio of mean to coefficient of variation, reflecting how evenly ancestry is spread across chromosomes. Higher values indicate smoother distributions shaped by many tracts and longer diffusion times.</li>
-        <li><strong>Sparsity</strong>: a normalized measure of whether ancestry mass is concentrated on few chromosomes (high sparsity) or spread broadly (low sparsity). Founder events and bottlenecks drive sparsity upward; broad admixture lowers it.</li>
+        <li><strong>Pulse</strong>: excess top-chromosome concentration, computed from <code>((Top-n / Mean) - 1) / log2(100 / Mean)</code>. An even row has a natural baseline near zero.</li>
+        <li><strong>Stability</strong>: raw chromosome-level smoothness, computed as <code>-log(CV + eps)</code>. Higher values mean lower relative variation across chromosomes.</li>
+        <li><strong>Residual Stability</strong>: the part of Stability left after fitting Stability against <code>log(Mean + eps)</code>. This is a secondary diagnostic for "smoother than expected for its mean."</li>
+        <li><strong>Sparsity</strong>: Hoyer sparsity across chromosome percentages. Higher values mean the signal is concentrated on fewer chromosomes.</li>
+        <li><strong>Spike</strong>: the raw <code>Top-n / Mean</code> ratio before the excess-Pulse adjustment.</li>
       </ul>
 
       <h6 class="mt-4">Standardized Scores & Chart</h6>
       <p>
-        To make different populations comparable within a run, each metric is Box–Cox transformed and standardized into a z-score:
+        Pulse, Stability, Residual Stability, and Sparsity are Yeo-Johnson transformed and
+        standardized into z-scores within the current run:
       </p>
       <ul>
-        <li><strong>Pulse Score (z)</strong> → plotted on the X-axis: higher values mean stronger top-heavy concentration after adjusting for mean.</li>
-        <li><strong>Stability Score (z)</strong> → plotted on the Y-axis: higher values mean more even distribution across chromosomes.</li>
-        <li><strong>Sparsity Score (z)</strong> → encoded in bubble color: blue = denser, black = average, red = concentrated on few chromosomes.</li>
-        <li><strong>Mean (%)</strong> → sets bubble area: larger bubbles represent greater total ancestry share.</li>
+        <li><strong>Pulse Score (z)</strong>: plotted on the X-axis; higher values mean stronger excess top-heavy concentration.</li>
+        <li><strong>Stability Score (z)</strong>: plotted on the Y-axis; higher values mean smoother chromosome-level distribution.</li>
+        <li><strong>Residual Stability Score (z)</strong>: shown in the score table as a mean-adjusted smoothness diagnostic.</li>
+        <li><strong>Sparsity Score (z)</strong>: encoded in color; blue is less sparse, black is near average, and red is more sparse.</li>
+        <li><strong>Mean (%)</strong>: sets bubble area; larger bubbles represent greater total ancestry share.</li>
       </ul>
       <p>
-        The scatter plot thus encodes each ancestry component as a four-tuple (<em>x</em>=Pulse Score, <em>y</em>=Stability Score, bubble size=Mean, bubble color=Sparsity Score). Quadrant positions suggest admixture dynamics:
-        upper-right = recent amplification of a broad ancestry, lower-right = narrow, recent contribution, upper-left = old diffuse background, lower-left = minimal/noise-level signal.
+        Scores are relative to the populations in the pasted dataset. A point high
+        on Stability is not absolutely "old"; it is smoother compared
+        with the other components in that run.
       </p>
 
       <h6 class="mt-4">Theoretical Interpretation</h6>
       <p>
-        In population genetic terms, admixture tracts follow an exponential length distribution with mean length inversely
-        proportional to generations since admixture. Over time, recombination breaks donor tracts into many small fragments,
-        lowering between-chromosome variance and reducing sparsity. Thus:
+        Recombination, drift, inheritance randomness, reference-panel overlap, and
+        calculator noise can all shape chromosome-level values. The tool therefore
+        describes patterns rather than assigning dates:
       </p>
       <ul>
-        <li><strong>Recent pulses</strong> → high Pulse, often high Sparsity (few long tracts stand out).</li>
-        <li><strong>Older admixture</strong> → moderate Pulse, high Stability, low Sparsity (ancestry diffused across the genome).</li>
-        <li><strong>Founder effects / bottlenecks</strong> → elevate Sparsity even when Mean is large, since the same regions are repeatedly inherited.</li>
-        <li><strong>Broad-source admixture</strong> → suppresses Sparsity, since many donor lineages contribute segments across chromosomes.</li>
+        <li><strong>High Pulse</strong>: one or several chromosomes are elevated relative to the component's own mean.</li>
+        <li><strong>High Stability</strong>: the component is more evenly spread across chromosomes.</li>
+        <li><strong>High Residual Stability</strong>: the component is more evenly spread than expected for its mean.</li>
+        <li><strong>High Sparsity</strong>: ancestry mass is concentrated on fewer chromosomes.</li>
+        <li><strong>Low Mean</strong>: interpretations should be cautious, because tiny components are more vulnerable to noise.</li>
       </ul>
 
       <h6 class="mt-4">Limitations</h6>
       <ul>
         <li>Scores are standardized within the dataset, so interpretation is relative, not absolute.</li>
-        <li>Pulse is normalized by a theoretical halving clock but does not literally date admixture events.</li>
-        <li>Weighting by SNP counts approximates genetic length but is imperfect; true recombination maps would refine estimates.</li>
+        <li>Pulse is a between-chromosome concentration statistic, not a date estimate.</li>
+        <li>Weighting by SNP counts approximates chromosome length but does not replace a recombination map.</li>
         <li>Signals in closely related reference populations can move together; interpretation must consider correlated ancestry panels.</li>
+        <li>Calculator percentages are estimates, not directly observed ancestry tracts.</li>
       </ul>
     </div>
   </div>
@@ -177,51 +188,10 @@
       return Number.isFinite(n) ? n : 0;
     };
 
-    // small epsilon to avoid division by zero in Stability / Pulse
-    const EPS = 0;
+    // Small epsilon to avoid division and log instability.
+    const EPS = 1e-9;
 
-    // Box–Cox: returns {lambda, z}
-    function boxCoxZ(values){
-      const n = values.length;
-      if(n === 0) return {lambda: 1, z: []};
-      // Ensure strictly positive via shift
-      const minV = Math.min(...values);
-      const shift = (minV <= 0) ? (-minV + EPS) : 0;
-      const y = values.map(v => v + shift);
-      const sumLogY = y.reduce((a,b)=>a+Math.log(b),0);
-
-      function transform(y, lambda){
-        if(Math.abs(lambda) < 1e-12) return y.map(v=>Math.log(v));
-        return y.map(v => (Math.pow(v, lambda) - 1)/lambda);
-      }
-      function mean(arr){ return arr.reduce((a,b)=>a+b,0)/arr.length; }
-
-      let bestL = 1, bestLL = -Infinity;
-      // Coarse grid then fine grid
-      for(let L=-5; L<=5; L+=0.05){
-        const t = transform(y, L);
-        const m = mean(t);
-        const sse = t.reduce((a,b)=>a+Math.pow(b-m,2),0);
-        const ll = -(n/2)*Math.log(sse/n) + (L-1)*sumLogY; // profile log-likelihood
-        if(ll > bestLL){ bestLL = ll; bestL = L; }
-      }
-      const start = bestL - 0.05, end = bestL + 0.05, step = 0.005;
-      for(let L=start; L<=end; L+=step){
-        const t = transform(y, L);
-        const m = mean(t);
-        const sse = t.reduce((a,b)=>a+Math.pow(b-m,2),0);
-        const ll = -(n/2)*Math.log(sse/n) + (L-1)*sumLogY;
-        if(ll > bestLL){ bestLL = ll; bestL = L; }
-      }
-      const T = transform(y, bestL);
-      const mT = mean(T);
-      const sdT = Math.sqrt(T.reduce((a,b)=>a+Math.pow(b-mT,2),0) / (n || 1));
-      const z = T.map(v => (sdT === 0 ? 0 : (v - mT)/sdT));
-      return {lambda: bestL, z};
-    }
-
-    // Yeo–Johnson: returns { lambda, z }
-    // Might be important in the future... but Box–Cox suffices for now.
+    // Yeo-Johnson: returns { lambda, z }
     // - values: Array<number>
     // - Grid-search MLE for lambda, then standardize transformed values to z-scores.
     function yeoJohnsonZ(values){
@@ -313,24 +283,40 @@
       return values.reduce((acc, v, i) => acc + weights[i] * Math.pow(v - mean, 2), 0) / sumW;
     }
 
-    function weightedSparsity(values, snpCount){
+    function hoyerSparsity(values){
       const n = values.length;
-
-      // Fractions of fullness
-      const fractions = values.map((val, i) => val / snpCount[i]);
-
-      // L1 and L2 norms
-      const l1 = fractions.reduce((a, b) => a + Math.abs(b), 0);
-      const l2 = Math.sqrt(fractions.reduce((a, b) => a + b*b, 0));
-
-      // Hoyer sparsity
+      const l1 = values.reduce((a, b) => a + Math.abs(b), 0);
+      const l2 = Math.sqrt(values.reduce((a, b) => a + b*b, 0));
+      if(n <= 1 || l2 <= EPS) return 0;
       const sparsity = (Math.sqrt(n) - (l1 / l2)) / (Math.sqrt(n) - 1);
-
-      return sparsity;
+      return Math.min(1, Math.max(0, sparsity));
     }
 
+    function residualizeStability(rows){
+      const raw = rows.map(r => -Math.log((r.cv || 0) + EPS));
+      const points = rows.map((r, i) => ({
+        i,
+        x: Math.log((r.mean || 0) + EPS),
+        y: raw[i]
+      })).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
 
-    // Probably best to just have "calculateProperty" and then have a switch for weighted or not... Maybe...
+      if(points.length < 4) return raw;
+
+      const meanX = points.reduce((s,p)=>s+p.x,0) / points.length;
+      const meanY = points.reduce((s,p)=>s+p.y,0) / points.length;
+      const varX = points.reduce((s,p)=>s + Math.pow(p.x - meanX, 2), 0);
+      if(varX <= EPS) return raw;
+
+      const covXY = points.reduce((s,p)=>s + (p.x - meanX) * (p.y - meanY), 0);
+      const slope = covXY / varX;
+      const intercept = meanY - slope * meanX;
+
+      return rows.map((r, i) => {
+        const x = Math.log((r.mean || 0) + EPS);
+        return Number.isFinite(x) ? raw[i] - (intercept + slope * x) : raw[i];
+      });
+    }
+
     function parseGedmatch(raw, opts={}){
       const topN = Math.max(1, Math.floor(opts.topN ?? 1));
       const weighted = !!opts.weighted;
@@ -392,16 +378,7 @@
         const sdU   = Math.sqrt(varU);
         const cvU   = meanU === 0 ? 0 : (sdU / meanU);
 
-        // Calculate Hoyer Sparsity
-        const n = nums.length;
-        // L1 norm (sum of absolute values, but nums are >=0 so just sum)
-        const l1 = nums.reduce((a, b) => a + Math.abs(b), 0);
-
-        // L2 norm (square root of sum of squares)
-        const l2 = Math.sqrt(nums.reduce((a, b) => a + b*b, 0));
-
-        // Hoyer sparsity
-        const sparsityU = (Math.sqrt(n) - (l1 / l2)) / (Math.sqrt(n) - 1);
+        const sparsityU = hoyerSparsity(nums);
 
         const topSorted = [...nums].sort((a,b)=>b-a);
         const nActual   = Math.min(topN, topSorted.length || 1);
@@ -415,7 +392,6 @@
           const varW = weightedVariance(nums, wKept);
           sd = Math.sqrt(varW);
           cv = mean === 0 ? 0 : (sd / mean);
-          sparsity = weightedSparsity(nums, wKept);
 
           // Weighted Top-n mean: pick top n by value, then weight by SNPs within that subset
           const pairs = nums.map((v,i)=>({ v, w: wKept[i] })).sort((a,b)=>b.v - a.v);
@@ -427,34 +403,44 @@
         }
 
         // Derived metrics (shared)
-        const spike = (topMean / (mean || EPS));
-        const denom = Math.log2(100 / (mean || EPS)) + EPS;
-        const pulse = (spike / denom);
-        const stability = (mean / (cv + EPS));
+        const safeMean = Math.max(mean, EPS);
+        const spike = (topMean / safeMean);
+        const excessSpike = Math.max(0, spike - 1);
+        const denom = Math.max(Math.log2(100 / safeMean), EPS);
+        const pulse = (excessSpike / denom);
+        const rawSmoothness = -Math.log(cv + EPS);
 
         return {
           label: r.label,
-          nums, percs, mean, cv, topMean, spike, pulse, stability, sparsity
+          nums, percs, mean, cv, topMean, spike, pulse, rawSmoothness, stability: rawSmoothness, sparsity
         };
       });
 
-      // Header: Population, Top-n Mean/Max, Mean, CV, Spike, Pulse, Stability, Chr 1..N (renumbered cleanly)
-      const extremaLabel = (topN === 1) ? "Max" : `Top-${topN} Mean`;
-      const header = ["Population", "Pulse", "Stability", "Sparsity", extremaLabel, "Mean", "CV", "Spike"];
-      for(let i=1;i<=keptIdx.length;i++) header.push(`Chr ${i}`);
+      const residualStability = residualizeStability(calcRows);
+      calcRows.forEach((r, idx) => {
+        r.residualStability = residualStability[idx];
+      });
 
-      // Scores sheet (Box–Cox z of Pulse and Stability)
+      // Header: Population, Top-n Mean/Max, Mean, CV, Spike, Pulse, Stability, original chromosome numbers
+      const extremaLabel = (topN === 1) ? "Max" : `Top-${topN} Mean`;
+      const header = ["Population", "Pulse", "Stability", "Residual Stability", "Sparsity", extremaLabel, "Mean", "CV", "Spike"];
+      keptIdx.forEach(i => header.push(`Chr ${i + 1}`));
+
+      // Scores sheet (Yeo-Johnson z of Pulse, Stability, residual Stability, and Sparsity)
       const pulseVals = calcRows.map(r=>r.pulse);
       const stabVals = calcRows.map(r=>r.stability);
-      const {lambda: lamPulse, z: zPulse} = boxCoxZ(pulseVals);
-      const {lambda: lamStab, z: zStab}   = boxCoxZ(stabVals);
-      const {lambda: lamSparsity, z: zSparsity} = boxCoxZ(calcRows.map(r=>r.sparsity));
+      const residualStabVals = calcRows.map(r=>r.residualStability);
+      const {lambda: lamPulse, z: zPulse} = yeoJohnsonZ(pulseVals);
+      const {lambda: lamStab, z: zStab}   = yeoJohnsonZ(stabVals);
+      const {lambda: lamResidualStab, z: zResidualStab} = yeoJohnsonZ(residualStabVals);
+      const {lambda: lamSparsity, z: zSparsity} = yeoJohnsonZ(calcRows.map(r=>r.sparsity));
 
       // Table rows for main table
       const outRows = calcRows.map(r => [
         r.label,
-        (r.pulse / 2).toFixed(2),
+        r.pulse.toFixed(2),
         r.stability.toFixed(2),
+        r.residualStability.toFixed(2),
         r.sparsity.toFixed(4),
         r.topMean.toFixed(2)+"%",
         r.mean.toFixed(2)+"%",
@@ -463,18 +449,19 @@
         ...keptIdx.map(i => r.percs[keptIdx.indexOf(i)])
       ]);
 
-      const scoreHeader = ["Region", "Pulse Score", "Stability Score", "Sparsity Score"];
+      const scoreHeader = ["Region", "Pulse Score", "Stability Score", "Residual Stability Score", "Sparsity Score"];
       const scoreRows   = calcRows.map((r,idx)=>[
         r.label,
         zPulse[idx].toFixed(4),
         zStab[idx].toFixed(4),
+        zResidualStab[idx].toFixed(4),
         zSparsity[idx].toFixed(4)
       ]);
 
       return {
         header, data: outRows, keptCount: keptIdx.length,
         scoreHeader, scoreRows,
-        lambdas: {pulse: lamPulse, stability: lamStab}
+        lambdas: {pulse: lamPulse, stability: lamStab, residualStability: lamResidualStab, sparsity: lamSparsity, transform: 'yeo-johnson'}
       };
     }
 
@@ -544,9 +531,9 @@
         $('#scoreTable').DataTable().clear().destroy();
       }
 
-      // Percent columns for sorting in main: [1,2,3] and chromosome columns starting at 7
-      const pctColsMain = [1,2,3, ...Array.from({length: keptCount}, (_,k)=>7+k)];
-      const numColsMain = [4,5,6]; // Spike, Pulse, Stability
+      // Percent columns: Top-n/Max, Mean, and chromosome columns.
+      const pctColsMain = [5,6, ...Array.from({length: keptCount}, (_,k)=>9+k)];
+      const numColsMain = [1,2,3,4,7,8]; // Pulse, Stability, residual Stability, Sparsity, CV, Spike
 
       $('#resultTable').DataTable({
         paging:true, searching:true, info:true, ordering:true, scrollX:true,
@@ -582,7 +569,7 @@
         ],
         columnDefs:[
           {
-            targets: [1,2],
+            targets: [1,2,3,4],
             render: function(data, type){
               if(type === 'sort' || type === 'type') return parseFloat(data) || 0;
               return data;
@@ -598,6 +585,7 @@
       const regions = rows.map(r => r[0]);
       const xAll = rows.map(r => parseFloat(r[1])); // Pulse Score (z)
       const yAll = rows.map(r => parseFloat(r[2])); // Stability Score (z)
+      const residualAll = rows.map(r => parseFloat(r[3])); // Residual Stability Score (z)
 
       // Keep only finite points and remember their indices
       const X = [], Y = [], T = [], idxs = [];
@@ -608,83 +596,52 @@
         }
       }
 
-      // --- Use per-row Mean from parsed.data (col 5) to size bubbles ---
+      // --- Use per-row Mean from parsed.data (col 6) to size bubbles ---
       const allMeans = (parsed.data || []).map(row => {
-        const m = row?.[5] ?? "0%";               // "Mean" column in main table
+        const m = row?.[6] ?? "0%";               // "Mean" column in main table
         return parseFloat(String(m).replace('%','')) || 0;
       });
       const sVals = idxs.map(i => Math.max(allMeans[i], 0.01)); // keep visible
 
-      // --- Use per row sparsity from parsed.data (col 3) to color bubbles. Since sparsity ranges from 0 to 1, we'll use 0.5 as black, 0 as bright blue, 1 as bright red ---
-      let allSparsity = (parsed.data || []).map(row => {
-        const s = row?.[3] ?? "0";               // "Sparsity" column in main table
+      // --- Use standardized sparsity to color bubbles. ---
+      const allSparsity = (parsed.scoreRows || []).map(row => {
+        const s = row?.[4] ?? "0";               // "Sparsity Score" column in scores table
         return parseFloat(String(s)) || 0;
       });
-
-      if (true) {
-        // Use box-cox sparsity instead, which is from rows (parsed.scoreRows col 3)
-        allSparsity = (parsed.scoreRows || []).map(row => {
-          const s = row?.[3] ?? "0";               // "Sparsity Score" column in scores table
-          return parseFloat(String(s)) || 0;
-        });
-      }
-
       const spVals = idxs.map(i => allSparsity[i]);
+      const residualVals = idxs.map(i => Number.isFinite(residualAll[i]) ? residualAll[i] : 0);
 
-      // Store both as customdata
-      const customData = idxs.map(i => [sVals[idxs.indexOf(i)], spVals[idxs.indexOf(i)]]);
+      // Store extra values for hover.
+      const customData = idxs.map((_, j) => [sVals[j], residualVals[j], spVals[j]]);
 
-      let cVals = idxs.map(i => {
-        const s = allSparsity[i];
-        if (s <= 0.5) {
-          // Blue to Black: s=0 → blue, s=0.5 → black
-          const t = s / 0.5;
+      const minS = Math.min(...spVals);
+      const maxSparse = Math.max(...spVals);
+      const range = Math.max(Math.abs(minS), Math.abs(maxSparse), 1);
+      const cVals = spVals.map(s => {
+        if (s < 0) {
+          // Blue to black: s=-range -> blue, s=0 -> black.
+          const t = (s + range) / range;
           const r = Math.round(0 * (1 - t) + 0 * t);
           const g = Math.round(0 * (1 - t) + 0 * t);
           const b = Math.round(255 * (1 - t) + 0 * t);
           return `rgb(${r},${g},${b})`;
-        } else {
-          // Black to Red: s=0.5 → black, s=1 → red
-          const t = (s - 0.5) / 0.5;
-          const r = Math.round(0 * (1 - t) + 255 * t);
-          const g = Math.round(0 * (1 - t) + 0 * t);
-          const b = Math.round(0 * (1 - t) + 0 * t);
-          return `rgb(${r},${g},${b})`;
         }
+        // Black to red: s=0 -> black, s=+range -> red.
+        const t = s / range;
+        const r = Math.round(0 * (1 - t) + 255 * t);
+        const g = Math.round(0 * (1 - t) + 0 * t);
+        const b = Math.round(0 * (1 - t) + 0 * t);
+        return `rgb(${r},${g},${b})`;
       });
-
-      if (true) {
-        // Black is now 0, Blue is negative, Red is positive
-        const minS = Math.min(...spVals);
-        const maxS = Math.max(...spVals);
-        const range = Math.max(Math.abs(minS), Math.abs(maxS), 1);
-        cVals = spVals.map(s => {
-          if (s < 0) {
-            // Blue to Black: s=-range → blue, s=0 → black
-            const t = (s + range) / range;
-            const r = Math.round(0 * (1 - t) + 0 * t);
-            const g = Math.round(0 * (1 - t) + 0 * t);
-            const b = Math.round(255 * (1 - t) + 0 * t);
-            return `rgb(${r},${g},${b})`;
-          } else {
-            // Black to Red: s=0 → black, s=+range → red
-            const t = s / range;
-            const r = Math.round(0 * (1 - t) + 255 * t);
-            const g = Math.round(0 * (1 - t) + 0 * t);
-            const b = Math.round(0 * (1 - t) + 0 * t);
-            return `rgb(${r},${g},${b})`;
-          }
-        });
-      }
 
       // Size so the largest bubble ≈ 40px diameter
       const desiredMaxPx = 40;
       const maxS = Math.max(...sVals, 1);
       const sizeref = (2 * maxS) / (desiredMaxPx ** 2);
 
-      // Axis ranges (square)
+      // Axis ranges (square), padded enough for markers and labels near the edges.
       const maxAbs = Math.max(1, ...X.map(Math.abs), ...Y.map(Math.abs));
-      const R = maxAbs * 1.1;
+      const R = Math.max(1.5, maxAbs * 1.2 + 0.2);
 
       const trace = {
         x: X,
@@ -693,7 +650,8 @@
         mode: 'markers+text',
         type: 'scatter',
         textposition: 'top center',
-        customdata: customData, // Mean for hover
+        cliponaxis: false,
+        customdata: customData,
         marker: {
           size: sVals,
           sizemode: 'area',
@@ -706,15 +664,16 @@
           '<b>%{text}</b><br>' +
           'Pulse: %{x:.3f}<br>' +
           'Stability: %{y:.3f}<br>' +
-          'Sparsity: %{customdata[1]:.4f}<br>' +
+          'Residual Stability: %{customdata[1]:.3f}<br>' +
+          'Sparsity: %{customdata[2]:.4f}<br>' +
           'Mean: %{customdata[0]:.2f}%<extra></extra>'
       };
 
       const layout = {
         title: 'Population Admixture Multimodal Analysis',
-        xaxis: { title: 'Pulse Score (z)', range: [-R, R], zeroline: false, mirror: true },
-        yaxis: { title: 'Stability Score (z)', range: [-R, R], zeroline: false, mirror: true},
-        margin: { l: 60, r: 40, t: 60, b: 60 },
+        xaxis: { title: 'Pulse Score (z)', range: [-R, R], zeroline: false, mirror: true, automargin: true },
+        yaxis: { title: 'Stability Score (z)', range: [-R, R], zeroline: false, mirror: true, automargin: true},
+        margin: { l: 70, r: 70, t: 80, b: 75 },
         shapes: [
           { type: 'line', x0: -R, x1: R, y0: 0, y1: 0, line: { width: 1, dash: 'dot' } },
           { type: 'line', x0: 0, x1: 0, y0: -R, y1: R, line: { width: 1, dash: 'dot' } }
@@ -775,20 +734,21 @@
       document.getElementById('unweighted').checked = true;
       await doProcess();
       const ths1 = Array.from(document.querySelectorAll('#resultTable thead th')).map(th=>th.textContent);
-      out.push('Test 1 header first columns: ' + ths1.slice(0,8).join(' | '));
+      out.push('Test 1 header first columns: ' + ths1.slice(0,9).join(' | '));
 
       // Test 2: n=3 should change label to Top-3 Mean and include Pulse column
       document.getElementById('nInput').value = '3';
       await doProcess();
-      const firstHeader = document.querySelector('#resultTable thead th:nth-child(2)').textContent;
+      const ths2 = Array.from(document.querySelectorAll('#resultTable thead th')).map(th=>th.textContent);
+      const topNHeader = ths2[5];
       const hasPulse = ths1.includes('Pulse');
-      out.push('Test 2 Top-n label: ' + firstHeader);
+      out.push('Test 2 Top-n label: ' + topNHeader);
       out.push('Test 2 Pulse present: ' + (hasPulse ? 'yes' : 'no'));
 
       // Test 3: CV for uniform row (Finnish) should be ~0.00
       const rows = Array.from(document.querySelectorAll('#resultTable tbody tr'));
       const finnRow = rows.find(tr => tr.firstElementChild.textContent.trim() === 'Finnish');
-      const cvCell = finnRow ? finnRow.children[3].textContent.trim() : '(row missing)';
+      const cvCell = finnRow ? finnRow.children[7].textContent.trim() : '(row missing)';
       out.push('Test 3 Finnish CV: ' + cvCell);
 
       // Test 4: Score table shape and z-score centering
@@ -799,21 +759,27 @@
       const meanZ = pulseScores.reduce((a,b)=>a+b,0)/(pulseScores.length||1);
       out.push('Test 4 Pulse z-mean (approx 0): ' + meanZ.toFixed(3));
 
-      // Test 5: Weighted vs Unweighted Max should differ when SNP counts are uneven
+      // Test 5: Weighted vs Unweighted Mean should differ when SNP counts are uneven
       document.getElementById('inputData').value = sampleData();
       document.getElementById('nInput').value = '1';
 
       document.getElementById('unweighted').checked = true;
       await doProcess();
-      const maxUnw = document.querySelector('#resultTable tbody tr td:nth-child(2)').textContent;
+      const meanUnw = document.querySelector('#resultTable tbody tr td:nth-child(7)').textContent;
 
       document.getElementById('weighted').checked = true;
       await doProcess();
-      const maxW = document.querySelector('#resultTable tbody tr td:nth-child(2)').textContent;
+      const meanW = document.querySelector('#resultTable tbody tr td:nth-child(7)').textContent;
 
-      out.push('Test 5 Max (unweighted → weighted): ' + maxUnw + ' → ' + maxW);
+      out.push('Test 5 Mean (unweighted -> weighted): ' + meanUnw + ' -> ' + meanW);
 
-      document.getElementById('testOutput').textContent = out.join('\n');
+      const outputEl = document.getElementById('testOutput');
+      if(outputEl){
+        outputEl.classList.remove('d-none');
+        outputEl.textContent = out.join('\n');
+      } else {
+        console.log(out.join('\n'));
+      }
     }
 
     // ---------- Wire up on DOM ready (vanilla) ----------
@@ -827,4 +793,3 @@
   </script>
 </body>
 </html>
-
