@@ -36,24 +36,34 @@
     <div class="card shadow-sm mb-3">
       <div class="card-body">
         <div class="workspace-controls row g-3 align-items-end">
-          <div class="col-md-4">
+          <div class="col-md-3">
             <label class="form-label fw-semibold" for="workspaceName">Workspace name</label>
             <input id="workspaceName" type="text" class="form-control" value="admixture-workspace" autocomplete="off" />
           </div>
           <div class="col-md-3">
+            <label class="form-label fw-semibold" for="kitSelect">Visible kit</label>
+            <select id="kitSelect" class="form-select"></select>
+          </div>
+          <div class="col-md-2">
             <div class="form-check">
               <input id="includeRawInput" class="form-check-input" type="checkbox" checked />
               <label class="form-check-label fw-semibold" for="includeRawInput">Include raw paste</label>
             </div>
-            <div class="form-text">Saved inside the encrypted file.</div>
+            <div class="form-text">For this kit.</div>
           </div>
-          <div class="col-md-5 d-flex gap-2 flex-wrap">
+          <div class="col-md-4 d-flex gap-2 flex-wrap">
             <button id="saveWorkspaceBtn" class="btn btn-outline-primary">Save Workspace</button>
             <button id="loadWorkspaceBtn" class="btn btn-outline-secondary">Load Workspace</button>
             <input id="workspaceFileInput" type="file" class="d-none" accept=".chromoworkspace,application/json" />
           </div>
+          <div class="col-12 d-flex gap-2 flex-wrap">
+            <button id="newKitBtn" class="btn btn-sm btn-outline-success">New Kit</button>
+            <button id="renameKitBtn" class="btn btn-sm btn-outline-secondary">Rename Kit</button>
+            <button id="duplicateKitBtn" class="btn btn-sm btn-outline-secondary">Duplicate Kit</button>
+            <button id="deleteKitBtn" class="btn btn-sm btn-outline-danger">Delete Kit</button>
+          </div>
           <div class="col-12">
-            <div id="workspaceStatus" class="form-text text-muted">Workspace files are saved and loaded only when you choose. No autosave is used.</div>
+            <div id="workspaceStatus" class="form-text text-muted">A workspace can hold multiple kits. Files are saved and loaded only when you choose. No autosave is used.</div>
           </div>
         </div>
       </div>
@@ -185,13 +195,15 @@
       <h6 class="mt-4">Workspace Files</h6>
       <p>
         Workspaces are saved and loaded only when requested. The app does not
-        autosave or store results in browser storage. A workspace downloads as a
-        visible <code>.chromoworkspace</code> file encrypted with a passphrase.
+        autosave or store results in browser storage. A workspace can hold
+        multiple kits, and it downloads as a visible
+        <code>.chromoworkspace</code> file encrypted with a passphrase.
       </p>
       <ul>
         <li><strong>Encryption</strong>: workspace contents are encrypted with AES-GCM using a key derived from the passphrase with PBKDF2-HMAC-SHA-256, 650,000 iterations, a fresh random salt, and a fresh random IV.</li>
-        <li><strong>Saved state</strong>: the encrypted payload includes parsed results, analysis settings, chart settings, and the workspace name.</li>
-        <li><strong>Raw paste</strong>: the original pasted GEDmatch text is included only when <em>Include raw paste</em> is enabled. Parsed results are still saved either way.</li>
+        <li><strong>Saved state</strong>: the encrypted payload includes the workspace name, the active kit, and each kit's parsed results, analysis settings, and chart settings.</li>
+        <li><strong>Kit switching</strong>: the <em>Visible kit</em> selector swaps which kit is shown in the paste box, tables, and chart. New, rename, duplicate, and delete act on the in-memory workspace until the next manual save. Cross-kit comparison is not performed in this view.</li>
+        <li><strong>Raw paste</strong>: each kit's original pasted GEDmatch text is included only when <em>Include raw paste</em> is enabled for that kit. Parsed results are still saved either way.</li>
         <li><strong>No recovery</strong>: forgotten passphrases cannot be recovered by the app.</li>
       </ul>
 
@@ -310,6 +322,7 @@
     // ---------- Encrypted workspace files ----------
     const WORKSPACE_FORMAT = 'gedmatch-chromo-workspace';
     const WORKSPACE_VERSION = 1;
+    const WORKSPACE_PAYLOAD_VERSION = 2;
     const WORKSPACE_EXTENSION = '.chromoworkspace';
     const WORKSPACE_KDF_ITERATIONS = 650000;
 
@@ -1048,6 +1061,27 @@
 
     // ---------- Workspace state and actions ----------
     let workspacePassphraseResolve = null;
+    let lastParsedSignature = null;
+    let workspaceState = {
+      format: WORKSPACE_FORMAT,
+      version: WORKSPACE_PAYLOAD_VERSION,
+      workspaceName: 'admixture-workspace',
+      activeKitId: '',
+      kits: []
+    };
+
+    function clonePlain(value){
+      return value == null ? value : JSON.parse(JSON.stringify(value));
+    }
+
+    function parseSignature(raw, settings){
+      const normalized = normalizeAnalysisSettings(settings || defaultAnalysisSettings());
+      return JSON.stringify({
+        raw: raw || '',
+        topN: normalized.topN,
+        weighted: normalized.weighted
+      });
+    }
 
     function setInputValue(id, value){
       const el = document.getElementById(id);
@@ -1059,6 +1093,21 @@
       if(el) el.checked = !!value;
     }
 
+    function defaultAnalysisSettings(){
+      return {
+        topN: 1,
+        weighted: false,
+        plot: {
+          yAxis: 'stability',
+          labels: 'all',
+          lowSignalCutoff: 0.5,
+          minMean: 0,
+          topMeanLimit: 0,
+          showHints: false
+        }
+      };
+    }
+
     function getAnalysisSettings(){
       return {
         topN: Math.max(1, parseInt(document.getElementById('nInput').value || '1', 10)),
@@ -1067,22 +1116,235 @@
       };
     }
 
+    function normalizeAnalysisSettings(settings = {}){
+      const defaults = defaultAnalysisSettings();
+      const plot = settings.plot || {};
+      return {
+        topN: Math.max(1, parseInt(settings.topN ?? defaults.topN, 10) || 1),
+        weighted: !!settings.weighted,
+        plot: {
+          yAxis: plot.yAxis || defaults.plot.yAxis,
+          labels: plot.labels || defaults.plot.labels,
+          lowSignalCutoff: Number.isFinite(plot.lowSignalCutoff) ? plot.lowSignalCutoff : defaults.plot.lowSignalCutoff,
+          minMean: Number.isFinite(plot.minMean) ? plot.minMean : defaults.plot.minMean,
+          topMeanLimit: Number.isFinite(plot.topMeanLimit) ? plot.topMeanLimit : defaults.plot.topMeanLimit,
+          showHints: !!plot.showHints
+        }
+      };
+    }
+
     function applyAnalysisSettings(settings = {}){
-      if(settings.topN) setInputValue('nInput', Math.max(1, parseInt(settings.topN, 10) || 1));
-      if(settings.weighted){
+      const normalized = normalizeAnalysisSettings(settings);
+      setInputValue('nInput', normalized.topN);
+      if(normalized.weighted){
         setChecked('weighted', true);
         setChecked('unweighted', false);
       } else {
         setChecked('unweighted', true);
         setChecked('weighted', false);
       }
-      const plot = settings.plot || {};
-      if(plot.yAxis) setInputValue('plotYAxis', plot.yAxis);
-      if(plot.labels) setInputValue('plotLabels', plot.labels);
-      if(Number.isFinite(plot.lowSignalCutoff)) setInputValue('lowSignalCutoff', plot.lowSignalCutoff);
-      if(Number.isFinite(plot.minMean)) setInputValue('minMeanFilter', plot.minMean);
-      if(Number.isFinite(plot.topMeanLimit)) setInputValue('topMeanLimit', plot.topMeanLimit);
-      if('showHints' in plot) setChecked('showPlotHints', plot.showHints);
+      const plot = normalized.plot || {};
+      setInputValue('plotYAxis', plot.yAxis);
+      setInputValue('plotLabels', plot.labels);
+      setInputValue('lowSignalCutoff', plot.lowSignalCutoff);
+      setInputValue('minMeanFilter', plot.minMean);
+      setInputValue('topMeanLimit', plot.topMeanLimit);
+      setChecked('showPlotHints', plot.showHints);
+    }
+
+    function newKitId(){
+      const c = window.crypto || globalThis.crypto;
+      if(c?.randomUUID) return c.randomUUID();
+      return 'kit-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    function nextKitName(){
+      const used = new Set((workspaceState.kits || []).map(k => k.name));
+      let n = (workspaceState.kits || []).length + 1;
+      while(used.has(`Kit ${n}`)) n += 1;
+      return `Kit ${n}`;
+    }
+
+    function createKit(name, seed = {}){
+      const now = new Date().toISOString();
+      return {
+        id: seed.id || newKitId(),
+        name: String(name || seed.name || nextKitName()).trim() || nextKitName(),
+        createdAt: seed.createdAt || now,
+        updatedAt: seed.updatedAt || now,
+        rawIncluded: seed.rawIncluded !== false,
+        rawInput: seed.rawInput || '',
+        settings: normalizeAnalysisSettings(seed.settings || defaultAnalysisSettings()),
+        parsed: seed.parsed ? clonePlain(seed.parsed) : null,
+        parsedSignature: seed.parsedSignature || null
+      };
+    }
+
+    function ensureWorkspaceState(){
+      if(!workspaceState || !Array.isArray(workspaceState.kits)){
+        workspaceState = {
+          format: WORKSPACE_FORMAT,
+          version: WORKSPACE_PAYLOAD_VERSION,
+          workspaceName: 'admixture-workspace',
+          activeKitId: '',
+          kits: []
+        };
+      }
+      if(workspaceState.kits.length === 0){
+        const kit = createKit('Kit 1');
+        workspaceState.kits.push(kit);
+        workspaceState.activeKitId = kit.id;
+      }
+      if(!workspaceState.activeKitId || !workspaceState.kits.some(k => k.id === workspaceState.activeKitId)){
+        workspaceState.activeKitId = workspaceState.kits[0].id;
+      }
+      return workspaceState;
+    }
+
+    function activeKit(){
+      ensureWorkspaceState();
+      return workspaceState.kits.find(k => k.id === workspaceState.activeKitId) || workspaceState.kits[0];
+    }
+
+    function renderKitSelector(){
+      ensureWorkspaceState();
+      const select = document.getElementById('kitSelect');
+      if(select){
+        select.innerHTML = '';
+        workspaceState.kits.forEach(kit => {
+          const option = document.createElement('option');
+          option.value = kit.id;
+          option.textContent = kit.name;
+          select.appendChild(option);
+        });
+        select.value = workspaceState.activeKitId;
+      }
+      const deleteBtn = document.getElementById('deleteKitBtn');
+      if(deleteBtn) deleteBtn.disabled = workspaceState.kits.length <= 1;
+    }
+
+    function clearResultsView(){
+      if(hasDT()){
+        const $ = window.jQuery;
+        if($.fn.DataTable.isDataTable('#resultTable')) $('#resultTable').DataTable().clear().destroy();
+        if($.fn.DataTable.isDataTable('#scoreTable'))  $('#scoreTable').DataTable().clear().destroy();
+      }
+      const resultHead = document.querySelector('#resultTable thead');
+      const resultBody = document.querySelector('#resultTable tbody');
+      const scoreHead = document.querySelector('#scoreTable thead');
+      const scoreBody = document.querySelector('#scoreTable tbody');
+      if(resultHead) resultHead.innerHTML = '';
+      if(resultBody) resultBody.innerHTML = '';
+      if(scoreHead) scoreHead.innerHTML = '';
+      if(scoreBody) scoreBody.innerHTML = '';
+      if(window.Plotly){ Plotly.purge('scorePlot'); }
+    }
+
+    function captureActiveKitState(){
+      const kit = activeKit();
+      if(!kit) return null;
+      const workspaceNameEl = document.getElementById('workspaceName');
+      if(workspaceNameEl) workspaceState.workspaceName = workspaceNameEl.value || workspaceState.workspaceName || 'admixture-workspace';
+      const rawInput = document.getElementById('inputData')?.value || '';
+      const settings = getAnalysisSettings();
+      const signature = parseSignature(rawInput, settings);
+      const parsedStillMatches = !!lastParsed && lastParsedSignature === signature;
+      kit.rawIncluded = !!document.getElementById('includeRawInput')?.checked;
+      kit.rawInput = rawInput;
+      kit.settings = settings;
+      kit.parsed = parsedStillMatches ? clonePlain(lastParsed) : null;
+      kit.parsedSignature = parsedStillMatches ? (lastParsedSignature || signature) : null;
+      kit.updatedAt = new Date().toISOString();
+      return kit;
+    }
+
+    function applyKitToUi(kit){
+      if(!kit) return;
+      setChecked('includeRawInput', kit.rawIncluded !== false);
+      setInputValue('inputData', kit.rawInput || '');
+      applyAnalysisSettings(kit.settings || defaultAnalysisSettings());
+      lastParsed = kit.parsed ? clonePlain(kit.parsed) : null;
+      lastParsedSignature = kit.parsed ? (kit.parsedSignature || parseSignature(kit.rawInput || '', kit.settings)) : null;
+      if(lastParsed?.header && lastParsed?.data){
+        renderTables(lastParsed);
+        renderPlot(lastParsed);
+      } else {
+        clearResultsView();
+      }
+    }
+
+    function setActiveKit(kitId, statusMsg){
+      ensureWorkspaceState();
+      if(!workspaceState.kits.some(k => k.id === kitId)) return;
+      workspaceState.activeKitId = kitId;
+      renderKitSelector();
+      applyKitToUi(activeKit());
+      if(statusMsg) setWorkspaceStatus(statusMsg, 'text-muted');
+    }
+
+    function initializeWorkspaceUi(){
+      ensureWorkspaceState();
+      setInputValue('workspaceName', workspaceState.workspaceName || 'admixture-workspace');
+      renderKitSelector();
+      applyKitToUi(activeKit());
+    }
+
+    function promptKitName(message, fallback){
+      const value = window.prompt(message, fallback);
+      if(value == null) return null;
+      const clean = value.trim();
+      return clean || fallback;
+    }
+
+    function newKit(){
+      captureActiveKitState();
+      const name = promptKitName('New kit name', nextKitName());
+      if(!name) return;
+      const kit = createKit(name);
+      workspaceState.kits.push(kit);
+      setActiveKit(kit.id, `Created ${kit.name}. Save Workspace when you want to write the file.`);
+    }
+
+    function renameKit(){
+      const kit = activeKit();
+      if(!kit) return;
+      const name = promptKitName('Rename kit', kit.name);
+      if(!name) return;
+      kit.name = name;
+      kit.updatedAt = new Date().toISOString();
+      renderKitSelector();
+      setWorkspaceStatus(`Renamed active kit to ${kit.name}.`, 'text-muted');
+    }
+
+    function duplicateKit(){
+      const source = captureActiveKitState();
+      if(!source) return;
+      const name = promptKitName('Duplicate kit name', `${source.name} copy`);
+      if(!name) return;
+      const kit = createKit(name, {
+        rawIncluded: source.rawIncluded,
+        rawInput: source.rawInput,
+        settings: clonePlain(source.settings),
+        parsed: clonePlain(source.parsed),
+        parsedSignature: source.parsedSignature
+      });
+      workspaceState.kits.push(kit);
+      setActiveKit(kit.id, `Duplicated ${source.name} as ${kit.name}.`);
+    }
+
+    function deleteKit(){
+      ensureWorkspaceState();
+      if(workspaceState.kits.length <= 1){
+        setWorkspaceStatus('A workspace must keep at least one kit.', 'text-danger');
+        return;
+      }
+      const kit = activeKit();
+      if(!kit) return;
+      if(!window.confirm(`Delete ${kit.name} from this workspace? The saved file is unchanged until you save again.`)) return;
+      const idx = workspaceState.kits.findIndex(k => k.id === kit.id);
+      workspaceState.kits.splice(idx, 1);
+      const next = workspaceState.kits[Math.max(0, idx - 1)] || workspaceState.kits[0];
+      setActiveKit(next.id, `Deleted ${kit.name}. Save Workspace when you want to write the change.`);
     }
 
     function workspacePassphraseError(msg){
@@ -1143,31 +1405,85 @@
       closeWorkspacePassphrase(passphrase);
     }
 
+    function serializeKitForWorkspace(kit){
+      return {
+        id: kit.id,
+        name: kit.name,
+        createdAt: kit.createdAt,
+        updatedAt: kit.updatedAt,
+        rawIncluded: kit.rawIncluded !== false,
+        rawInput: kit.rawIncluded !== false ? (kit.rawInput || '') : '',
+        settings: normalizeAnalysisSettings(kit.settings),
+        parsed: kit.parsed ? clonePlain(kit.parsed) : null,
+        parsedSignature: kit.parsedSignature || null
+      };
+    }
+
     function buildWorkspacePayload(){
-      if(!lastParsed) throw new Error('Process data before saving a workspace.');
-      const includeRaw = !!document.getElementById('includeRawInput')?.checked;
-      const workspaceName = document.getElementById('workspaceName')?.value || 'admixture-workspace';
+      ensureWorkspaceState();
+      captureActiveKitState();
+      const workspaceName = document.getElementById('workspaceName')?.value || workspaceState.workspaceName || 'admixture-workspace';
+      workspaceState.workspaceName = workspaceName;
       return {
         format: WORKSPACE_FORMAT,
-        version: WORKSPACE_VERSION,
+        version: WORKSPACE_PAYLOAD_VERSION,
         savedAt: new Date().toISOString(),
         workspaceName,
-        rawIncluded: includeRaw,
-        rawInput: includeRaw ? (document.getElementById('inputData')?.value || '') : '',
-        settings: getAnalysisSettings(),
-        parsed: lastParsed
+        activeKitId: workspaceState.activeKitId,
+        kits: workspaceState.kits.map(serializeKitForWorkspace)
+      };
+    }
+
+    function normalizeKitPayload(kit, fallbackName){
+      return createKit(kit?.name || fallbackName || nextKitName(), {
+        id: kit?.id || newKitId(),
+        createdAt: kit?.createdAt,
+        updatedAt: kit?.updatedAt,
+        rawIncluded: kit?.rawIncluded !== false,
+        rawInput: kit?.rawInput || '',
+        settings: kit?.settings || defaultAnalysisSettings(),
+        parsed: kit?.parsed || null,
+        parsedSignature: kit?.parsedSignature || null
+      });
+    }
+
+    function normalizeWorkspacePayload(payload, filename){
+      if(!payload || payload.format !== WORKSPACE_FORMAT){
+        throw new Error('The decrypted file is not a supported workspace.');
+      }
+
+      let kits;
+      let activeKitId;
+      if(Array.isArray(payload.kits)){
+        kits = payload.kits.map((kit, idx) => normalizeKitPayload(kit, `Kit ${idx + 1}`));
+        activeKitId = payload.activeKitId;
+      } else {
+        const oldKit = normalizeKitPayload({
+          name: payload.kitName || 'Kit 1',
+          rawIncluded: payload.rawIncluded !== false,
+          rawInput: payload.rawInput || '',
+          settings: payload.settings || defaultAnalysisSettings(),
+          parsed: payload.parsed || null
+        }, 'Kit 1');
+        kits = [oldKit];
+        activeKitId = oldKit.id;
+      }
+
+      kits = kits.filter(kit => kit && kit.id);
+      if(kits.length === 0) kits = [createKit('Kit 1')];
+      if(!activeKitId || !kits.some(k => k.id === activeKitId)) activeKitId = kits[0].id;
+
+      return {
+        format: WORKSPACE_FORMAT,
+        version: WORKSPACE_PAYLOAD_VERSION,
+        workspaceName: payload.workspaceName || workspaceNameFromFile(filename),
+        activeKitId,
+        kits
       };
     }
 
     async function saveWorkspace(){
-      let payload;
-      try{
-        payload = buildWorkspacePayload();
-      }catch(e){
-        setWorkspaceStatus(e.message, 'text-danger');
-        return;
-      }
-
+      const payload = buildWorkspacePayload();
       const filename = workspaceFilename(payload.workspaceName);
       const passphrase = await requestWorkspacePassphrase({mode: 'save', filename});
       if(!passphrase){
@@ -1179,7 +1495,7 @@
         setWorkspaceStatus('Encrypting workspace...', 'text-primary');
         const envelope = await encryptWorkspacePayload(payload, passphrase);
         downloadWorkspaceFile(envelope, filename);
-        setWorkspaceStatus(`Saved encrypted workspace as ${filename}.`, 'text-success');
+        setWorkspaceStatus(`Saved ${payload.kits.length} kit${payload.kits.length === 1 ? '' : 's'} as ${filename}.`, 'text-success');
       }catch(e){
         console.error(e);
         setWorkspaceStatus(e.message || 'Workspace save failed.', 'text-danger');
@@ -1187,27 +1503,14 @@
     }
 
     async function restoreWorkspacePayload(payload, filename){
-      if(!payload || payload.format !== WORKSPACE_FORMAT || payload.version !== WORKSPACE_VERSION){
-        throw new Error('The decrypted file is not a supported workspace.');
-      }
       await ensureDT();
-      setInputValue('workspaceName', payload.workspaceName || workspaceNameFromFile(filename));
-      applyAnalysisSettings(payload.settings || {});
-      setChecked('includeRawInput', payload.rawIncluded !== false);
-      setInputValue('inputData', payload.rawIncluded ? (payload.rawInput || '') : '');
-
-      if(payload.parsed?.header && payload.parsed?.data){
-        lastParsed = payload.parsed;
-        renderTables(payload.parsed);
-        renderPlot(payload.parsed);
-      } else if(payload.rawInput){
-        await doProcess();
-      } else {
-        throw new Error('Workspace does not contain restorable results.');
-      }
-
-      const rawNote = payload.rawIncluded ? 'Raw paste restored.' : 'Raw paste was not included.';
-      setWorkspaceStatus(`Loaded ${filename}. ${rawNote}`, 'text-success');
+      workspaceState = normalizeWorkspacePayload(payload, filename);
+      setInputValue('workspaceName', workspaceState.workspaceName || workspaceNameFromFile(filename));
+      renderKitSelector();
+      applyKitToUi(activeKit());
+      const kit = activeKit();
+      const rawNote = kit.rawIncluded ? 'Raw paste restored for the active kit.' : 'Raw paste was not included for the active kit.';
+      setWorkspaceStatus(`Loaded ${filename} with ${workspaceState.kits.length} kit${workspaceState.kits.length === 1 ? '' : 's'}. ${rawNote}`, 'text-success');
     }
 
     async function loadWorkspaceFile(file){
@@ -1236,26 +1539,22 @@
       const weighted = document.getElementById('weighted').checked;
       const parsed = parseGedmatch(raw, { topN: n, weighted });
       lastParsed = parsed;
+      lastParsedSignature = parseSignature(raw, {topN: n, weighted});
       renderTables(parsed);
       renderPlot(parsed);
-      setWorkspaceStatus('Current results are ready. Use Save Workspace to write an encrypted file.', 'text-muted');
+      const kit = captureActiveKitState();
+      renderKitSelector();
+      setWorkspaceStatus(`${kit?.name || 'Current kit'} results are ready. Use Save Workspace to write an encrypted file.`, 'text-muted');
     }
 
     async function doClear(){
       await ensureDT();
       document.getElementById('inputData').value = '';
-      if(hasDT()){
-        const $ = window.jQuery;
-        if($.fn.DataTable.isDataTable('#resultTable')) $('#resultTable').DataTable().clear().destroy();
-        if($.fn.DataTable.isDataTable('#scoreTable'))  $('#scoreTable').DataTable().clear().destroy();
-      }
-      document.querySelector('#resultTable thead').innerHTML = '';
-      document.querySelector('#resultTable tbody').innerHTML = '';
-      document.querySelector('#scoreTable thead').innerHTML = '';
-      document.querySelector('#scoreTable tbody').innerHTML = '';
       lastParsed = null;
-      if(window.Plotly){ Plotly.purge('scorePlot'); }
-      setWorkspaceStatus('Current results cleared. No workspace file was changed.', 'text-muted');
+      lastParsedSignature = null;
+      clearResultsView();
+      const kit = captureActiveKitState();
+      setWorkspaceStatus(`${kit?.name || 'Current kit'} cleared. No workspace file was changed.`, 'text-muted');
     }
 
     // ---------- Demo Tests ----------
@@ -1322,12 +1621,19 @@
       try{
         const workspacePayload = {
           format: WORKSPACE_FORMAT,
-          version: WORKSPACE_VERSION,
+          version: WORKSPACE_PAYLOAD_VERSION,
           workspaceName: 'test-workspace',
-          rawIncluded: false,
-          rawInput: '',
-          settings: getAnalysisSettings(),
-          parsed: lastParsed
+          activeKitId: 'test-kit',
+          kits: [{
+            id: 'test-kit',
+            name: 'Test Kit',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            rawIncluded: false,
+            rawInput: '',
+            settings: getAnalysisSettings(),
+            parsed: lastParsed
+          }]
         };
         const envelope = await encryptWorkspacePayload(workspacePayload, 'test-passphrase');
         const reopened = await decryptWorkspaceEnvelope(envelope, 'test-passphrase');
@@ -1338,6 +1644,7 @@
           rejectedWrongPassphrase = true;
         }
         out.push('Test 6 Workspace encryption: ' + (reopened.workspaceName === 'test-workspace' ? 'ok' : 'failed'));
+        out.push('Test 6 Workspace kit count: ' + (reopened.kits?.length || 0));
         out.push('Test 6 Wrong passphrase rejected: ' + (rejectedWrongPassphrase ? 'yes' : 'no'));
       }catch(e){
         out.push('Test 6 Workspace encryption skipped: ' + e.message);
@@ -1356,6 +1663,7 @@
     document.addEventListener('DOMContentLoaded', async ()=>{
       updateStatus('Libraries: loading…', 'text-bg-warning');
       ensureDT(); // kick off async loading
+      initializeWorkspaceUi();
       document.getElementById('processBtn').addEventListener('click', doProcess);
       document.getElementById('clearBtn').addEventListener('click', doClear);
       document.getElementById('testBtn').addEventListener('click', runTests);
@@ -1363,6 +1671,17 @@
       document.getElementById('loadWorkspaceBtn').addEventListener('click', () => {
         document.getElementById('workspaceFileInput').click();
       });
+      document.getElementById('kitSelect').addEventListener('change', e => {
+        const previous = activeKit();
+        captureActiveKitState();
+        const nextId = e.target.value;
+        const next = workspaceState.kits.find(k => k.id === nextId);
+        setActiveKit(nextId, `Switched from ${previous?.name || 'kit'} to ${next?.name || 'kit'}.`);
+      });
+      document.getElementById('newKitBtn').addEventListener('click', newKit);
+      document.getElementById('renameKitBtn').addEventListener('click', renameKit);
+      document.getElementById('duplicateKitBtn').addEventListener('click', duplicateKit);
+      document.getElementById('deleteKitBtn').addEventListener('click', deleteKit);
       document.getElementById('workspaceFileInput').addEventListener('change', async e => {
         const file = e.target.files?.[0];
         e.target.value = '';

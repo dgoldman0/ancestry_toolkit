@@ -211,13 +211,21 @@
     Workspace saving is manual. The app does not autosave, and it does not store
     workspaces in localStorage, sessionStorage, or IndexedDB. When you choose
     <strong>Save Workspace</strong>, the app downloads a visible
-    <code>.chromoworkspace</code> file.
+    <code>.chromoworkspace</code> file. A workspace can hold multiple kits.
   </p>
   <p>
-    The workspace payload includes parsed results, analysis settings, chart
-    settings, the workspace name, and optionally the raw pasted GEDmatch text.
-    Raw input is included only when <strong>Include raw paste</strong> is enabled;
-    parsed results are saved either way.
+    The workspace payload includes the workspace name, the active kit, and each
+    kit's parsed results, analysis settings, and chart settings. The
+    <strong>Visible kit</strong> selector swaps which kit is shown in the paste
+    box, tables, and chart. New, rename, duplicate, and delete update the
+    in-memory workspace until the next manual save. This first multi-kit view
+    does not perform cross-kit comparison; it only switches the visible analysis.
+  </p>
+  <p>
+    Raw input is tracked per kit and is included only when
+    <strong>Include raw paste</strong> is enabled for that kit; parsed results are
+    saved either way. Loaded single-kit workspace files from the earlier format
+    are treated as one-kit workspaces.
   </p>
   <p>
     Workspace contents are encrypted in the browser using AES-GCM with a
