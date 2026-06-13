@@ -213,10 +213,13 @@
     hold multiple kits in a visible <code>.chromoworkspace</code> file.
   </p>
   <p>
-    In browsers with file-handle support, <strong>Open Workspace</strong> and
-    <strong>Save As</strong> associate the current workspace with that file, so
-    later <strong>Save</strong> writes back to it without opening another file
-    picker. Other browsers fall back to encrypted downloads.
+    When <strong>Open Workspace</strong> or <strong>Save As</strong> provides a
+    writable file handle, later <strong>Save</strong> writes back to that file
+    without opening another file picker. Other browsers can only download
+    encrypted copies; the app reuses the known filename, but browser download
+    settings may still ask where to save it.
+    After a successful unlock or save, the passphrase is remembered only in the
+    current page session.
   </p>
   <p>
     The workspace payload includes the workspace name, the active kit, and each

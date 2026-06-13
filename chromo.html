@@ -202,7 +202,7 @@
       </p>
       <ul>
         <li><strong>Encryption</strong>: workspace contents are encrypted with AES-GCM using a key derived from the passphrase with PBKDF2-HMAC-SHA-256, 650,000 iterations, a fresh random salt, and a fresh random IV.</li>
-        <li><strong>Save behavior</strong>: in browsers with file-handle support, <em>Open Workspace</em> and <em>Save As</em> associate the workspace with that file, so later <em>Save</em> writes back to it without another file picker. Other browsers fall back to encrypted downloads.</li>
+        <li><strong>Save behavior</strong>: when <em>Open Workspace</em> or <em>Save As</em> provides a writable file handle, later <em>Save</em> writes back to it without another file picker. Other browsers can only download encrypted copies; the app reuses the known filename, but browser download settings may still ask where to save it. After a successful unlock or save, the passphrase is remembered only in this page session.</li>
         <li><strong>Saved state</strong>: the encrypted payload includes the workspace name, the active kit, and each kit's parsed results, analysis settings, and chart settings.</li>
         <li><strong>Kit switching</strong>: the <em>Visible kit</em> selector swaps which kit is shown in the paste box, tables, and chart. New, rename, duplicate, and delete act on the in-memory workspace until the next manual save. Cross-kit comparison is not performed in this view.</li>
         <li><strong>Raw paste</strong>: each kit's original pasted GEDmatch text is included only when <em>Include raw paste</em> is enabled for that kit. Parsed results are still saved either way.</li>
@@ -470,8 +470,12 @@
       }]
     };
 
-    function supportsWorkspaceFileHandles(){
-      return !!(window.showSaveFilePicker && window.showOpenFilePicker);
+    function supportsWorkspaceOpenHandles(){
+      return !!window.showOpenFilePicker;
+    }
+
+    function supportsWorkspaceSaveHandles(){
+      return !!window.showSaveFilePicker;
     }
 
     async function ensureWorkspaceWritePermission(handle){
@@ -1102,6 +1106,7 @@
     let lastParsedSignature = null;
     let currentWorkspaceFileHandle = null;
     let currentWorkspaceFilename = '';
+    let currentWorkspacePassphrase = '';
     let workspaceState = {
       format: WORKSPACE_FORMAT,
       version: WORKSPACE_PAYLOAD_VERSION,
@@ -1334,6 +1339,10 @@
       currentWorkspaceFilename = filename || handle?.name || '';
     }
 
+    function rememberWorkspacePassphrase(passphrase){
+      currentWorkspacePassphrase = passphrase || '';
+    }
+
     function promptKitName(message, fallback){
       const value = window.prompt(message, fallback);
       if(value == null) return null;
@@ -1528,7 +1537,7 @@
     }
 
     async function chooseWorkspaceSaveHandle(filename){
-      if(!supportsWorkspaceFileHandles()) return null;
+      if(!supportsWorkspaceSaveHandles()) return null;
       return window.showSaveFilePicker({
         ...WORKSPACE_FILE_PICKER_OPTIONS,
         suggestedName: filename
@@ -1548,10 +1557,11 @@
 
     async function saveWorkspace({saveAs = false} = {}){
       const payload = buildWorkspacePayload();
-      const filename = workspaceFilename(payload.workspaceName);
+      const suggestedFilename = workspaceFilename(payload.workspaceName);
+      let filename = (!saveAs && currentWorkspaceFilename) ? currentWorkspaceFilename : suggestedFilename;
       let handle = currentWorkspaceFileHandle;
 
-      if(saveAs || !handle){
+      if(saveAs || (!handle && !currentWorkspaceFilename)){
         try{
           handle = await chooseWorkspaceSaveHandle(filename);
         }catch(e){
@@ -1565,8 +1575,9 @@
         }
       }
 
-      const displayFilename = handle?.name || filename;
-      const passphrase = await requestWorkspacePassphrase({mode: 'save', filename: displayFilename});
+      if(handle) filename = handle.name || filename;
+      const displayFilename = filename;
+      const passphrase = currentWorkspacePassphrase || (await requestWorkspacePassphrase({mode: 'save', filename: displayFilename}));
       if(!passphrase){
         setWorkspaceStatus('Workspace save canceled. No file was written.', 'text-muted');
         return;
@@ -1576,9 +1587,10 @@
         setWorkspaceStatus('Encrypting workspace...', 'text-primary');
         const envelope = await encryptWorkspacePayload(payload, passphrase);
         const result = await writeWorkspaceEnvelope(envelope, filename, handle);
+        rememberWorkspacePassphrase(passphrase);
         const tail = result.associated
           ? `Future Save writes back to ${result.filename}.`
-          : 'Use Save As again to write a separate downloaded copy.';
+          : `Future Save reuses ${result.filename} as the download filename. Your browser may still ask where downloads go.`;
         setWorkspaceStatus(`Saved ${payload.kits.length} kit${payload.kits.length === 1 ? '' : 's'} as ${result.filename}. ${tail}`, 'text-success');
       }catch(e){
         console.error(e);
@@ -1597,7 +1609,7 @@
       const rawNote = kit.rawIncluded ? 'Raw paste restored for the active kit.' : 'Raw paste was not included for the active kit.';
       const fileNote = handle
         ? 'Save will write back to this file.'
-        : 'Use Save As to choose where to write changes.';
+        : 'This browser did not provide a writable file handle, so Save will download a copy using this filename.';
       setWorkspaceStatus(`Loaded ${filename} with ${workspaceState.kits.length} kit${workspaceState.kits.length === 1 ? '' : 's'}. ${rawNote} ${fileNote}`, 'text-success');
     }
 
@@ -1613,6 +1625,7 @@
         const envelope = JSON.parse(await file.text());
         const payload = await decryptWorkspaceEnvelope(envelope, passphrase);
         await restoreWorkspacePayload(payload, file.name, handle);
+        rememberWorkspacePassphrase(passphrase);
       }catch(e){
         console.error(e);
         setWorkspaceStatus('Could not load workspace. The passphrase may be wrong, or the file may be damaged.', 'text-danger');
@@ -1620,7 +1633,7 @@
     }
 
     async function openWorkspace(){
-      if(supportsWorkspaceFileHandles()){
+      if(supportsWorkspaceOpenHandles()){
         try{
           const [handle] = await window.showOpenFilePicker({
             ...WORKSPACE_FILE_PICKER_OPTIONS,
