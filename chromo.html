@@ -18,6 +18,11 @@
     .plot-controls .form-control,.plot-controls .form-select{font-size:.9rem}
     .workspace-controls .form-label{font-size:.82rem;margin-bottom:.25rem}
     .workspace-controls .form-text{font-size:.82rem}
+    .tracker-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.65rem}
+    .tracker-stat{border-left:3px solid #dee2e6;padding:.2rem .75rem}
+    .tracker-stat .label{font-size:.75rem;text-transform:uppercase;color:#6c757d;letter-spacing:0}
+    .tracker-stat .value{font-size:1.15rem;font-weight:700;line-height:1.2}
+    .tracker-stat .note{font-size:.78rem;color:#6c757d}
     .workspace-modal{position:fixed;inset:0;z-index:1080;background:rgba(15,18,24,.48);display:flex;align-items:center;justify-content:center;padding:1rem}
     .workspace-modal.d-none{display:none!important}
     .workspace-modal .card{width:min(100%,460px)}
@@ -125,48 +130,84 @@
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <div class="plot-controls row g-2 align-items-end mb-3">
-          <div class="col-sm-6 col-lg-2">
-            <label class="form-label fw-semibold" for="plotYAxis">Y-axis</label>
-            <select id="plotYAxis" class="form-select">
-              <option value="stability" selected>Stability</option>
-              <option value="residual">Residual Stability</option>
-            </select>
-          </div>
-          <div class="col-sm-6 col-lg-2">
-            <label class="form-label fw-semibold" for="plotLabels">Labels</label>
-            <select id="plotLabels" class="form-select">
-              <option value="all" selected>All</option>
-              <option value="signal">Mean cutoff</option>
-              <option value="none">None</option>
-            </select>
-          </div>
-          <div class="col-sm-6 col-lg-2">
-            <label class="form-label fw-semibold" for="lowSignalCutoff">Low signal below</label>
-            <div class="input-group input-group-sm">
-              <input id="lowSignalCutoff" type="number" class="form-control" value="0.5" min="0" step="0.1" />
-              <span class="input-group-text">%</span>
-            </div>
-          </div>
-          <div class="col-sm-6 col-lg-2">
-            <label class="form-label fw-semibold" for="minMeanFilter">Min mean</label>
-            <div class="input-group input-group-sm">
-              <input id="minMeanFilter" type="number" class="form-control" value="0" min="0" step="0.1" />
-              <span class="input-group-text">%</span>
-            </div>
-          </div>
-          <div class="col-sm-6 col-lg-2">
-            <label class="form-label fw-semibold" for="topMeanLimit">Top mean count</label>
-            <input id="topMeanLimit" type="number" class="form-control form-control-sm" value="0" min="0" step="1" />
-          </div>
-          <div class="col-sm-6 col-lg-2">
-            <div class="form-check form-switch">
-              <input id="showPlotHints" class="form-check-input" type="checkbox" />
-              <label class="form-check-label fw-semibold" for="showPlotHints">Hints</label>
+          <div class="col-sm-6 col-lg-3">
+            <label class="form-label fw-semibold d-block">Analysis mode</label>
+            <div class="btn-group w-100" role="group" aria-label="Analysis mode">
+              <input type="radio" class="btn-check" name="analysisMode" id="modeOverview" value="overview" autocomplete="off" checked>
+              <label class="btn btn-outline-primary" for="modeOverview">Overview</label>
+
+              <input type="radio" class="btn-check" name="analysisMode" id="modePopulation" value="population" autocomplete="off">
+              <label class="btn btn-outline-primary" for="modePopulation">Population</label>
             </div>
           </div>
         </div>
-        <div id="scorePlot" style="width:100%;height:600px"></div>
-        <div class="form-text">Larger circles indicate higher overall mean admixture. Open circles mark low-signal components. Blue indicates low sparsity, black is near average, and red indicates high sparsity. Pulse marks excess top-chromosome concentration; Stability marks chromosome-level smoothness, with Residual Stability available as the mean-adjusted view.</div>
+        <div id="overviewModePanel">
+          <div class="plot-controls row g-2 align-items-end mb-3">
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="plotYAxis">Y-axis</label>
+              <select id="plotYAxis" class="form-select">
+                <option value="stability" selected>Stability</option>
+                <option value="residual">Residual Stability</option>
+              </select>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="plotLabels">Labels</label>
+              <select id="plotLabels" class="form-select">
+                <option value="all" selected>All</option>
+                <option value="signal">Mean cutoff</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="lowSignalCutoff">Low signal below</label>
+              <div class="input-group input-group-sm">
+                <input id="lowSignalCutoff" type="number" class="form-control" value="0.5" min="0" step="0.1" />
+                <span class="input-group-text">%</span>
+              </div>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="minMeanFilter">Min mean</label>
+              <div class="input-group input-group-sm">
+                <input id="minMeanFilter" type="number" class="form-control" value="0" min="0" step="0.1" />
+                <span class="input-group-text">%</span>
+              </div>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="topMeanLimit">Top mean count</label>
+              <input id="topMeanLimit" type="number" class="form-control form-control-sm" value="0" min="0" step="1" />
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <div class="form-check form-switch">
+                <input id="showPlotHints" class="form-check-input" type="checkbox" />
+                <label class="form-check-label fw-semibold" for="showPlotHints">Hints</label>
+              </div>
+            </div>
+          </div>
+          <div id="scorePlot" style="width:100%;height:600px"></div>
+          <div class="form-text">Larger circles indicate higher overall mean admixture. Open circles mark low-signal components. Blue indicates low sparsity, black is near average, and red indicates high sparsity. Pulse marks excess top-chromosome concentration; Stability marks chromosome-level smoothness, with Residual Stability available as the mean-adjusted view.</div>
+        </div>
+        <div id="populationModePanel" class="d-none">
+          <div class="plot-controls row g-2 align-items-end mb-3">
+            <div class="col-sm-6 col-lg-4">
+              <label class="form-label fw-semibold" for="trackerPopulation">Population</label>
+              <select id="trackerPopulation" class="form-select"></select>
+            </div>
+            <div class="col-sm-6 col-lg-3">
+              <label class="form-label fw-semibold" for="trackerBaseline">Baseline</label>
+              <select id="trackerBaseline" class="form-select">
+                <option value="lowerMedian" selected>Lower-half median</option>
+                <option value="median">Median</option>
+                <option value="trimmedMean">Trimmed mean</option>
+              </select>
+            </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="trackerResidualCutoff">Pulse cutoff</label>
+              <input id="trackerResidualCutoff" type="number" class="form-control form-control-sm" value="1.25" min="0" step="0.05" />
+            </div>
+          </div>
+          <div id="trackerSummary" class="tracker-summary mb-3"></div>
+          <div id="populationPlot" style="width:100%;height:640px"></div>
+        </div>
       </div>
     </div>
     <pre id="testOutput" class="small-mono bg-light border rounded p-2 d-none"></pre>
@@ -191,6 +232,12 @@
       <ul>
         <li><strong>Top-n Mean</strong>: controls how many of the largest chromosome values contribute to Pulse. <em>n=1</em> uses the maximum chromosome value.</li>
         <li><strong>Weighting</strong>: when enabled, Mean, CV, and Top-n Mean use SNP counts as chromosome-length proxies. Sparsity remains based on the displayed chromosome percentages.</li>
+      </ul>
+
+      <h6 class="mt-4">Visual Modes</h6>
+      <ul>
+        <li><strong>Overview</strong>: plots all populations against Pulse and Stability or Residual Stability.</li>
+        <li><strong>Population</strong>: tracks one population across chromosomes, estimates a conservative baseline, and highlights above-baseline residual peaks as exploratory pulse structure.</li>
       </ul>
 
       <h6 class="mt-4">Workspace Files</h6>
@@ -766,6 +813,9 @@
 
       const plotRows = calcRows.map((r, idx) => ({
         label: r.label,
+        chromosomeLabels: keptIdx.map(i => `Chr ${i + 1}`),
+        nums: [...r.nums],
+        percs: [...r.percs],
         mean: r.mean,
         topMean: r.topMean,
         cv: r.cv,
@@ -781,7 +831,7 @@
       }));
 
       return {
-        header, data: outRows, keptCount: keptIdx.length, plotRows,
+        header, data: outRows, keptCount: keptIdx.length, keptIdx, chromosomeLabels: keptIdx.map(i => `Chr ${i + 1}`), plotRows,
         scoreHeader, scoreRows,
         lambdas: {pulse: lamPulse, stability: lamStab, residualStability: lamResidualStab, sparsity: lamSparsity, transform: 'yeo-johnson'}
       };
@@ -928,12 +978,16 @@
 
     function readPlotOptions(){
       return {
+        mode: document.querySelector('input[name="analysisMode"]:checked')?.value || 'overview',
         yAxis: document.getElementById('plotYAxis')?.value || 'stability',
         labels: document.getElementById('plotLabels')?.value || 'all',
         lowSignalCutoff: Math.max(0, readNum('lowSignalCutoff', 0.5)),
         minMean: Math.max(0, readNum('minMeanFilter', 0)),
         topMeanLimit: Math.max(0, Math.floor(readNum('topMeanLimit', 0))),
-        showHints: !!document.getElementById('showPlotHints')?.checked
+        showHints: !!document.getElementById('showPlotHints')?.checked,
+        trackerPopulation: document.getElementById('trackerPopulation')?.value || document.getElementById('trackerPopulation')?.dataset.pendingValue || '',
+        trackerBaseline: document.getElementById('trackerBaseline')?.value || 'lowerMedian',
+        trackerResidualCutoff: Math.max(0, readNum('trackerResidualCutoff', 1.25))
       };
     }
 
@@ -947,6 +1001,320 @@
         rows = rows.filter(r => keep.has(r.label));
       }
       return rows;
+    }
+
+    function setAnalysisModePanels(mode){
+      const overview = document.getElementById('overviewModePanel');
+      const population = document.getElementById('populationModePanel');
+      const isPopulation = mode === 'population';
+      if(overview) overview.classList.toggle('d-none', isPopulation);
+      if(population) population.classList.toggle('d-none', !isPopulation);
+    }
+
+    function median(values){
+      const nums = values.filter(Number.isFinite).sort((a,b)=>a-b);
+      const n = nums.length;
+      if(n === 0) return 0;
+      const mid = Math.floor(n / 2);
+      return n % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+    }
+
+    function meanOf(values){
+      const nums = values.filter(Number.isFinite);
+      return nums.reduce((a,b)=>a+b,0) / (nums.length || 1);
+    }
+
+    function trackerRowsFromParsed(parsed){
+      const rows = (parsed?.plotRows || []).map(row => ({
+        ...row,
+        chromosomeLabels: row.chromosomeLabels || parsed.chromosomeLabels || [],
+        nums: Array.isArray(row.nums) ? row.nums.map(Number) : null
+      })).filter(row => Array.isArray(row.nums) && row.nums.length > 0);
+
+      if(rows.length > 0) return rows;
+
+      const header = parsed?.header || [];
+      const chrStart = header.findIndex(h => /^Chr\s+\d+/i.test(String(h)));
+      if(chrStart < 0) return [];
+
+      const chromosomeLabels = header.slice(chrStart);
+      return (parsed.data || []).map(row => {
+        const nums = row.slice(chrStart).map(pctToNum);
+        return {
+          label: row[0],
+          chromosomeLabels,
+          nums,
+          mean: pctToNum(row[6]),
+          topMean: pctToNum(row[5]),
+          cv: parseFloat(row[7]) || 0,
+          spike: parseFloat(row[8]) || 0,
+          pulse: parseFloat(row[1]) || 0,
+          stability: parseFloat(row[2]) || 0,
+          residualStability: parseFloat(row[3]) || 0,
+          sparsity: parseFloat(row[4]) || 0,
+          zPulse: 0,
+          zStability: 0,
+          zResidualStability: 0,
+          zSparsity: 0
+        };
+      });
+    }
+
+    function populateTrackerPopulationSelect(parsed){
+      const select = document.getElementById('trackerPopulation');
+      if(!select) return [];
+      const rows = trackerRowsFromParsed(parsed);
+      const desired = select.dataset.pendingValue || select.value || '';
+      select.innerHTML = '';
+      rows.forEach(row => {
+        const option = document.createElement('option');
+        option.value = row.label;
+        option.textContent = row.label;
+        select.appendChild(option);
+      });
+      const labels = new Set(rows.map(row => row.label));
+      if(labels.has(desired)){
+        select.value = desired;
+      } else if(rows.length > 0){
+        const strongest = [...rows].sort((a,b)=>(b.mean || 0) - (a.mean || 0))[0];
+        select.value = strongest.label;
+      }
+      select.dataset.pendingValue = '';
+      return rows;
+    }
+
+    function estimateTrackerBaseline(values, method){
+      const sorted = values.filter(Number.isFinite).sort((a,b)=>a-b);
+      if(sorted.length === 0) return 0;
+      if(method === 'median') return median(sorted);
+      if(method === 'trimmedMean'){
+        const trim = Math.floor(sorted.length * 0.2);
+        const kept = sorted.slice(trim, sorted.length - trim);
+        return meanOf(kept.length ? kept : sorted);
+      }
+      const lowerHalf = sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
+      return median(lowerHalf);
+    }
+
+    function effectiveChromosomeCount(values){
+      const total = values.reduce((a,b)=>a + Math.max(0, b), 0);
+      const sq = values.reduce((a,b)=>a + Math.pow(Math.max(0, b), 2), 0);
+      if(total <= EPS || sq <= EPS) return 0;
+      return (total * total) / sq;
+    }
+
+    function classifyTrackerShape(stats, row, opts){
+      const lowSignal = stats.mean < Math.max(0.15, opts.lowSignalCutoff);
+      if(lowSignal) return {
+        shape: 'Low signal',
+        compatible: 'Insufficient signal',
+        note: 'Treat as noise-sensitive'
+      };
+      if(stats.pulseCount <= 1 && stats.residualShare >= 0.35 && row.spike >= 2){
+        return {
+          shape: 'Single dominant pulse',
+          compatible: '1 sharp influx compatible',
+          note: 'One chromosome carries most excess'
+        };
+      }
+      if(stats.pulseCount >= 3 && stats.residualShare >= 0.3){
+        return {
+          shape: 'Several residual pulses',
+          compatible: '2+ influxes plausible',
+          note: 'Multiple chromosomes exceed baseline'
+        };
+      }
+      if(stats.baseline >= stats.mean * 0.65 && stats.pulseCount >= 1 && stats.residualShare >= 0.12){
+        return {
+          shape: 'Baseline plus spikes',
+          compatible: 'Older/repeated plus later pulse',
+          note: 'Diffuse floor with extra peaks'
+        };
+      }
+      if(stats.coverage >= Math.ceil(stats.values.length * 0.65) && stats.residualShare < 0.25){
+        return {
+          shape: 'Broad diffuse',
+          compatible: 'Older or repeated signal',
+          note: 'Spread across many chromosomes'
+        };
+      }
+      if(stats.coverage <= 3){
+        return {
+          shape: 'Sparse signal',
+          compatible: 'Fragile pulse signal',
+          note: 'Few chromosomes carry detectable mass'
+        };
+      }
+      return {
+        shape: 'Mixed / ambiguous',
+        compatible: 'Multiple explanations fit',
+        note: 'Needs comparison with context'
+      };
+    }
+
+    function analyzeTrackerRow(row, opts){
+      const values = row.nums.map(v => Number.isFinite(v) ? Math.max(0, v) : 0);
+      const labels = row.chromosomeLabels?.length === values.length
+        ? row.chromosomeLabels
+        : values.map((_v, i) => `Chr ${i + 1}`);
+      const baselineRaw = estimateTrackerBaseline(values, opts.trackerBaseline);
+      const baseline = Math.max(0, Math.min(Math.max(...values, 0), baselineRaw));
+      const residuals = values.map(v => Math.max(0, v - baseline));
+      const mean = Number.isFinite(row.mean) ? row.mean : meanOf(values);
+      const deviations = values.map(v => Math.abs(v - baseline));
+      const mad = median(deviations);
+      const noise = Math.max(mad, mean * 0.08, 0.05);
+      const threshold = baseline + opts.trackerResidualCutoff * noise;
+      const pulseFlags = values.map(v => v > threshold && v > baseline + EPS);
+      const pulseCount = pulseFlags.filter(Boolean).length;
+      const total = values.reduce((a,b)=>a+b,0);
+      const residualTotal = residuals.reduce((a,b)=>a+b,0);
+      const residualShare = total > EPS ? residualTotal / total : 0;
+      const coverageCutoff = Math.max(0.05, mean * 0.15);
+      const coverage = values.filter(v => v >= coverageCutoff).length;
+      const effectiveCount = effectiveChromosomeCount(values);
+      const stats = {
+        labels, values, residuals, pulseFlags, baseline, mean, threshold,
+        pulseCount, residualShare, coverage, effectiveCount
+      };
+      return {...stats, ...classifyTrackerShape(stats, row, opts)};
+    }
+
+    function renderTrackerSummary(row, stats){
+      const el = document.getElementById('trackerSummary');
+      if(!el) return;
+      const cells = [
+        ['Shape', stats.shape, stats.note],
+        ['Compatibility', stats.compatible, 'Exploratory'],
+        ['Mean', `${stats.mean.toFixed(2)}%`, `Spike ${row.spike.toFixed(2)}`],
+        ['Baseline', `${stats.baseline.toFixed(2)}%`, `Cutoff ${stats.threshold.toFixed(2)}%`],
+        ['Pulse chromosomes', String(stats.pulseCount), `${stats.coverage} covered`],
+        ['Residual share', `${(stats.residualShare * 100).toFixed(1)}%`, `Effective ${stats.effectiveCount.toFixed(1)}`]
+      ];
+      el.innerHTML = cells.map(([label, value, note]) => `
+        <div class="tracker-stat">
+          <div class="label">${escapeHtml(label)}</div>
+          <div class="value">${escapeHtml(value)}</div>
+          <div class="note">${escapeHtml(note)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderPopulationTracker(parsed){
+      const rows = populateTrackerPopulationSelect(parsed);
+      const select = document.getElementById('trackerPopulation');
+      const plotEl = document.getElementById('populationPlot');
+      if(!plotEl || !window.Plotly) return;
+
+      const selected = select?.value || '';
+      const row = rows.find(r => r.label === selected) || rows[0];
+      if(!row){
+        const summary = document.getElementById('trackerSummary');
+        if(summary) summary.innerHTML = '';
+        Plotly.react(plotEl, [], {
+          title: 'Tracked Population',
+          xaxis: {visible:false},
+          yaxis: {visible:false},
+          annotations: [{text:'Process data to track a population', x:.5, y:.5, xref:'paper', yref:'paper', showarrow:false}],
+          margin: {l:70, r:40, t:70, b:60}
+        }, {responsive:true, displaylogo:false});
+        return;
+      }
+
+      const opts = readPlotOptions();
+      const stats = analyzeTrackerRow(row, opts);
+      renderTrackerSummary(row, stats);
+
+      const barColors = stats.values.map((_v, i) => stats.pulseFlags[i] ? '#d94841' : '#2f7ed8');
+      const residualColors = stats.residuals.map((_v, i) => stats.pulseFlags[i] ? '#b4232d' : '#7aa7d9');
+      const lineX = stats.labels;
+      const meanLine = stats.labels.map(() => stats.mean);
+      const baselineLine = stats.labels.map(() => stats.baseline);
+      const thresholdLine = stats.labels.map(() => stats.threshold);
+
+      const traces = [
+        {
+          type: 'bar',
+          x: stats.labels,
+          y: stats.values,
+          name: 'Chromosome value',
+          marker: {color: barColors},
+          hovertemplate: '%{x}<br>Value: %{y:.2f}%<extra></extra>'
+        },
+        {
+          type: 'scatter',
+          mode: 'lines',
+          x: lineX,
+          y: meanLine,
+          name: 'Mean',
+          line: {color: '#1f1f24', width: 2}
+        },
+        {
+          type: 'scatter',
+          mode: 'lines',
+          x: lineX,
+          y: baselineLine,
+          name: 'Baseline',
+          line: {color: '#198754', width: 2, dash: 'dash'}
+        },
+        {
+          type: 'scatter',
+          mode: 'lines',
+          x: lineX,
+          y: thresholdLine,
+          name: 'Pulse cutoff',
+          line: {color: '#dc3545', width: 1.5, dash: 'dot'}
+        },
+        {
+          type: 'bar',
+          x: stats.labels,
+          y: stats.residuals,
+          xaxis: 'x2',
+          yaxis: 'y2',
+          name: 'Above baseline',
+          marker: {color: residualColors},
+          hovertemplate: '%{x}<br>Above baseline: %{y:.2f}%<extra></extra>'
+        }
+      ];
+
+      const maxTop = Math.max(...stats.values, stats.mean, stats.threshold, 1);
+      const maxResidual = Math.max(...stats.residuals, 1);
+      const layout = {
+        title: {
+          text: `Tracked Population: ${escapeHtml(row.label)}<br><sup>${escapeHtml(stats.shape)} - ${escapeHtml(stats.compatible)}</sup>`
+        },
+        barmode: 'overlay',
+        bargap: 0.18,
+        xaxis: {domain: [0, 1], anchor: 'y', tickangle: 0},
+        yaxis: {title: 'Chromosome %', domain: [0.42, 1], range: [0, maxTop * 1.18], rangemode: 'tozero'},
+        xaxis2: {domain: [0, 1], anchor: 'y2', matches: 'x', title: 'Chromosome'},
+        yaxis2: {title: 'Above baseline', domain: [0, 0.28], range: [0, maxResidual * 1.25], rangemode: 'tozero'},
+        legend: {orientation: 'h', y: 1.08, x: 0},
+        margin: {l:70, r:40, t:100, b:80},
+        hovermode: 'closest',
+        uirevision: 'population-tracker'
+      };
+
+      Plotly.react(plotEl, traces, layout, {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['select2d','lasso2d'],
+        toImageButtonOptions: {
+          format: 'png',
+          filename: `tracked_population_${row.label.replace(/\W+/g, '_').toLowerCase()}`,
+          width: 1400,
+          height: 950,
+          scale: 2
+        }
+      });
+    }
+
+    function renderVisualAnalysis(parsed){
+      const opts = readPlotOptions();
+      setAnalysisModePanels(opts.mode);
+      populateTrackerPopulationSelect(parsed);
+      if(opts.mode === 'population') renderPopulationTracker(parsed);
+      else renderPlot(parsed);
     }
 
     function plotHintAnnotations(){
@@ -1143,12 +1511,16 @@
         topN: 1,
         weighted: false,
         plot: {
+          mode: 'overview',
           yAxis: 'stability',
           labels: 'all',
           lowSignalCutoff: 0.5,
           minMean: 0,
           topMeanLimit: 0,
-          showHints: false
+          showHints: false,
+          trackerPopulation: '',
+          trackerBaseline: 'lowerMedian',
+          trackerResidualCutoff: 1.25
         }
       };
     }
@@ -1168,12 +1540,16 @@
         topN: Math.max(1, parseInt(settings.topN ?? defaults.topN, 10) || 1),
         weighted: !!settings.weighted,
         plot: {
+          mode: ['overview', 'population'].includes(plot.mode) ? plot.mode : defaults.plot.mode,
           yAxis: plot.yAxis || defaults.plot.yAxis,
           labels: plot.labels || defaults.plot.labels,
           lowSignalCutoff: Number.isFinite(plot.lowSignalCutoff) ? plot.lowSignalCutoff : defaults.plot.lowSignalCutoff,
           minMean: Number.isFinite(plot.minMean) ? plot.minMean : defaults.plot.minMean,
           topMeanLimit: Number.isFinite(plot.topMeanLimit) ? plot.topMeanLimit : defaults.plot.topMeanLimit,
-          showHints: !!plot.showHints
+          showHints: !!plot.showHints,
+          trackerPopulation: typeof plot.trackerPopulation === 'string' ? plot.trackerPopulation : defaults.plot.trackerPopulation,
+          trackerBaseline: ['lowerMedian', 'median', 'trimmedMean'].includes(plot.trackerBaseline) ? plot.trackerBaseline : defaults.plot.trackerBaseline,
+          trackerResidualCutoff: Number.isFinite(plot.trackerResidualCutoff) ? Math.max(0, plot.trackerResidualCutoff) : defaults.plot.trackerResidualCutoff
         }
       };
     }
@@ -1189,12 +1565,19 @@
         setChecked('weighted', false);
       }
       const plot = normalized.plot || {};
+      const modeEl = document.getElementById(plot.mode === 'population' ? 'modePopulation' : 'modeOverview');
+      if(modeEl) modeEl.checked = true;
+      setAnalysisModePanels(plot.mode);
       setInputValue('plotYAxis', plot.yAxis);
       setInputValue('plotLabels', plot.labels);
       setInputValue('lowSignalCutoff', plot.lowSignalCutoff);
       setInputValue('minMeanFilter', plot.minMean);
       setInputValue('topMeanLimit', plot.topMeanLimit);
       setChecked('showPlotHints', plot.showHints);
+      setInputValue('trackerBaseline', plot.trackerBaseline);
+      setInputValue('trackerResidualCutoff', plot.trackerResidualCutoff);
+      const trackerSelect = document.getElementById('trackerPopulation');
+      if(trackerSelect) trackerSelect.dataset.pendingValue = plot.trackerPopulation || '';
     }
 
     function newKitId(){
@@ -1283,6 +1666,11 @@
       if(scoreHead) scoreHead.innerHTML = '';
       if(scoreBody) scoreBody.innerHTML = '';
       if(window.Plotly){ Plotly.purge('scorePlot'); }
+      if(window.Plotly){ Plotly.purge('populationPlot'); }
+      const trackerSummary = document.getElementById('trackerSummary');
+      if(trackerSummary) trackerSummary.innerHTML = '';
+      const trackerPopulation = document.getElementById('trackerPopulation');
+      if(trackerPopulation) trackerPopulation.innerHTML = '';
     }
 
     function captureActiveKitState(){
@@ -1312,7 +1700,7 @@
       lastParsedSignature = kit.parsed ? (kit.parsedSignature || parseSignature(kit.rawInput || '', kit.settings)) : null;
       if(lastParsed?.header && lastParsed?.data){
         renderTables(lastParsed);
-        renderPlot(lastParsed);
+        renderVisualAnalysis(lastParsed);
       } else {
         clearResultsView();
       }
@@ -1665,7 +2053,7 @@
       lastParsed = parsed;
       lastParsedSignature = parseSignature(raw, {topN: n, weighted});
       renderTables(parsed);
-      renderPlot(parsed);
+      renderVisualAnalysis(parsed);
       const kit = captureActiveKitState();
       renderKitSelector();
       setWorkspaceStatus(`${kit?.name || 'Current kit'} results are ready. Use Save or Save As to write an encrypted file.`, 'text-muted');
@@ -1820,11 +2208,17 @@
           if(e.key === 'Escape') closeWorkspacePassphrase(null);
         });
       });
-      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints'].forEach(id => {
+      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints','trackerPopulation','trackerBaseline','trackerResidualCutoff'].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
-        el.addEventListener('change', () => { if(lastParsed) renderPlot(lastParsed); });
-        el.addEventListener('input', () => { if(lastParsed) renderPlot(lastParsed); });
+        el.addEventListener('change', () => { if(lastParsed) renderVisualAnalysis(lastParsed); });
+        el.addEventListener('input', () => { if(lastParsed) renderVisualAnalysis(lastParsed); });
+      });
+      document.querySelectorAll('input[name="analysisMode"]').forEach(el => {
+        el.addEventListener('change', () => {
+          if(lastParsed) renderVisualAnalysis(lastParsed);
+          else setAnalysisModePanels(readPlotOptions().mode);
+        });
       });
     });
   </script>
