@@ -125,7 +125,7 @@
       </table>
     </div>
 
-    <!-- Scatter Plot: Pulse Score (x) vs selected stability score (y) -->
+    <!-- Visual Analysis: overview map or target interaction map -->
     <h5 class="mt-4">Visual Analysis</h5>
     <div class="card shadow-sm mb-4">
       <div class="card-body">
@@ -189,20 +189,16 @@
         <div id="populationModePanel" class="d-none">
           <div class="plot-controls row g-2 align-items-end mb-3">
             <div class="col-sm-6 col-lg-4">
-              <label class="form-label fw-semibold" for="trackerPopulation">Population</label>
+              <label class="form-label fw-semibold" for="trackerPopulation">Target population</label>
               <select id="trackerPopulation" class="form-select"></select>
             </div>
             <div class="col-sm-6 col-lg-3">
-              <label class="form-label fw-semibold" for="trackerBaseline">Baseline</label>
-              <select id="trackerBaseline" class="form-select">
-                <option value="lowerMedian" selected>Lower-half median</option>
-                <option value="median">Median</option>
-                <option value="trimmedMean">Trimmed mean</option>
+              <label class="form-label fw-semibold" for="trackerLabels">Map labels</label>
+              <select id="trackerLabels" class="form-select">
+                <option value="strong" selected>Strongest</option>
+                <option value="all">All</option>
+                <option value="none">None</option>
               </select>
-            </div>
-            <div class="col-sm-6 col-lg-2">
-              <label class="form-label fw-semibold" for="trackerResidualCutoff">Pulse cutoff</label>
-              <input id="trackerResidualCutoff" type="number" class="form-control form-control-sm" value="1.25" min="0" step="0.05" />
             </div>
           </div>
           <div id="trackerSummary" class="tracker-summary mb-3"></div>
@@ -237,7 +233,7 @@
       <h6 class="mt-4">Visual Modes</h6>
       <ul>
         <li><strong>Overview</strong>: plots all populations against Pulse and Stability or Residual Stability.</li>
-        <li><strong>Population</strong>: tracks one population across chromosomes, estimates a conservative baseline, and highlights above-baseline residual peaks as exploratory pulse structure.</li>
+        <li><strong>Population</strong>: uses one population as the target lens and maps the rest of the populations by whether they move with it, move against it, and recur consistently in that target-conditioned context.</li>
       </ul>
 
       <h6 class="mt-4">Workspace Files</h6>
@@ -986,8 +982,7 @@
         topMeanLimit: Math.max(0, Math.floor(readNum('topMeanLimit', 0))),
         showHints: !!document.getElementById('showPlotHints')?.checked,
         trackerPopulation: document.getElementById('trackerPopulation')?.value || document.getElementById('trackerPopulation')?.dataset.pendingValue || '',
-        trackerBaseline: document.getElementById('trackerBaseline')?.value || 'lowerMedian',
-        trackerResidualCutoff: Math.max(0, readNum('trackerResidualCutoff', 1.25))
+        trackerLabels: document.getElementById('trackerLabels')?.value || 'strong'
       };
     }
 
@@ -1083,113 +1078,193 @@
       return rows;
     }
 
-    function estimateTrackerBaseline(values, method){
-      const sorted = values.filter(Number.isFinite).sort((a,b)=>a-b);
-      if(sorted.length === 0) return 0;
-      if(method === 'median') return median(sorted);
-      if(method === 'trimmedMean'){
-        const trim = Math.floor(sorted.length * 0.2);
-        const kept = sorted.slice(trim, sorted.length - trim);
-        return meanOf(kept.length ? kept : sorted);
-      }
-      const lowerHalf = sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
-      return median(lowerHalf);
+    function clamp(value, min, max){
+      return Math.min(max, Math.max(min, value));
     }
 
-    function effectiveChromosomeCount(values){
-      const total = values.reduce((a,b)=>a + Math.max(0, b), 0);
-      const sq = values.reduce((a,b)=>a + Math.pow(Math.max(0, b), 2), 0);
-      if(total <= EPS || sq <= EPS) return 0;
-      return (total * total) / sq;
+    function standardDeviation(values){
+      const nums = values.filter(Number.isFinite);
+      if(nums.length === 0) return 0;
+      const m = meanOf(nums);
+      return Math.sqrt(nums.reduce((s,v)=>s + Math.pow(v - m, 2), 0) / nums.length);
     }
 
-    function classifyTrackerShape(stats, row, opts){
-      const lowSignal = stats.mean < Math.max(0.15, opts.lowSignalCutoff);
-      if(lowSignal) return {
-        shape: 'Low signal',
-        compatible: 'Insufficient signal',
-        note: 'Treat as noise-sensitive'
-      };
-      if(stats.pulseCount <= 1 && stats.residualShare >= 0.35 && row.spike >= 2){
-        return {
-          shape: 'Single dominant pulse',
-          compatible: '1 sharp influx compatible',
-          note: 'One chromosome carries most excess'
-        };
+    function quantile(values, q){
+      const nums = values.filter(Number.isFinite).sort((a,b)=>a-b);
+      if(nums.length === 0) return 0;
+      const pos = (nums.length - 1) * clamp(q, 0, 1);
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      if(lo === hi) return nums[lo];
+      return nums[lo] + (nums[hi] - nums[lo]) * (pos - lo);
+    }
+
+    function averageRanks(values){
+      const pairs = values.map((v, i) => ({v, i})).sort((a,b)=>a.v-b.v);
+      const ranks = Array(values.length).fill(0);
+      let i = 0;
+      while(i < pairs.length){
+        let j = i + 1;
+        while(j < pairs.length && pairs[j].v === pairs[i].v) j += 1;
+        const rank = (i + j - 1) / 2 + 1;
+        for(let k = i; k < j; k++) ranks[pairs[k].i] = rank;
+        i = j;
       }
-      if(stats.pulseCount >= 3 && stats.residualShare >= 0.3){
-        return {
-          shape: 'Several residual pulses',
-          compatible: '2+ influxes plausible',
-          note: 'Multiple chromosomes exceed baseline'
-        };
+      return ranks;
+    }
+
+    function pearsonCorrelation(a, b){
+      const n = Math.min(a.length, b.length);
+      if(n < 2) return 0;
+      const ax = a.slice(0, n);
+      const bx = b.slice(0, n);
+      const ma = meanOf(ax);
+      const mb = meanOf(bx);
+      let cov = 0, va = 0, vb = 0;
+      for(let i = 0; i < n; i++){
+        const da = ax[i] - ma;
+        const db = bx[i] - mb;
+        cov += da * db;
+        va += da * da;
+        vb += db * db;
       }
-      if(stats.baseline >= stats.mean * 0.65 && stats.pulseCount >= 1 && stats.residualShare >= 0.12){
-        return {
-          shape: 'Baseline plus spikes',
-          compatible: 'Older/repeated plus later pulse',
-          note: 'Diffuse floor with extra peaks'
-        };
+      if(va <= EPS || vb <= EPS) return 0;
+      return clamp(cov / Math.sqrt(va * vb), -1, 1);
+    }
+
+    function spearmanCorrelation(a, b){
+      return pearsonCorrelation(averageRanks(a), averageRanks(b));
+    }
+
+    function indexedExtremes(values, count, desc = true){
+      return values.map((v, i) => ({v, i}))
+        .sort((a,b)=>desc ? b.v - a.v : a.v - b.v)
+        .slice(0, Math.min(count, values.length))
+        .map(p => p.i);
+    }
+
+    function meanAt(values, idxs){
+      return meanOf(idxs.map(i => values[i]).filter(Number.isFinite));
+    }
+
+    function analyzeTargetInteractions(target, rows, opts){
+      const targetValues = target.nums.map(v => Number.isFinite(v) ? Math.max(0, v) : 0);
+      const n = targetValues.length;
+      const highCut = quantile(targetValues, 0.75);
+      const lowCut = quantile(targetValues, 0.25);
+      let highIdx = targetValues.map((v, i) => (v >= highCut && v > 0) ? i : -1).filter(i => i >= 0);
+      let lowIdx = targetValues.map((v, i) => v <= lowCut ? i : -1).filter(i => i >= 0);
+      if(highIdx.length < 2) highIdx = indexedExtremes(targetValues, Math.min(3, n), true);
+      if(lowIdx.length < 2) lowIdx = indexedExtremes(targetValues, Math.min(3, n), false);
+
+      const targetMedian = median(targetValues);
+      const targetWeights = targetValues.map(v => Math.max(0, v - targetMedian));
+      const fallbackWeights = targetValues.map(v => Math.abs(v - targetMedian));
+      const weights = targetWeights.reduce((a,b)=>a+b,0) > EPS ? targetWeights : fallbackWeights;
+      const sumWeights = weights.reduce((a,b)=>a+b,0);
+
+      return rows
+        .filter(row => row.label !== target.label)
+        .map(row => {
+          const values = row.nums.map(v => Number.isFinite(v) ? Math.max(0, v) : 0);
+          const rankCorr = spearmanCorrelation(targetValues, values);
+          const highMean = meanAt(values, highIdx);
+          const lowMean = meanAt(values, lowIdx);
+          const contrastRaw = highMean - lowMean;
+          const contrast = clamp(contrastRaw / (Math.abs(highMean) + Math.abs(lowMean) + EPS), -1, 1);
+          const relationship = clamp(0.55 * rankCorr + 0.45 * contrast, -1, 1);
+          const direction = relationship >= 0 ? 1 : -1;
+          const popMedian = median(values);
+          const popSd = standardDeviation(values);
+          const matchWeight = values.reduce((sum, v, i) => {
+            const popDev = v - popMedian;
+            const matches = direction * popDev > EPS;
+            return sum + (matches ? weights[i] : 0);
+          }, 0);
+          const consistency = sumWeights > EPS ? matchWeight / sumWeights : Math.abs(relationship);
+          const support = highIdx.filter(i => direction * (values[i] - popMedian) > EPS).length;
+          const supportTarget = Math.max(2, Math.min(5, highIdx.length || 2));
+          const supportFactor = clamp(support / supportTarget, 0, 1);
+          let recurrence = clamp((0.65 * consistency) + (0.35 * supportFactor), 0, 1);
+          if(Math.abs(relationship) < 0.08) recurrence *= Math.abs(relationship) / 0.08;
+          const contrastZ = Math.abs(contrastRaw) / (popSd + EPS);
+          const specificity = clamp(contrastZ / 2, 0, 1);
+          const strength = clamp(Math.abs(relationship) * ((0.55 * recurrence) + (0.45 * specificity)), 0, 1);
+          const role = relationship > 0.15 ? 'Companion' : relationship < -0.15 ? 'Displaced' : 'Weak relation';
+          const context = recurrence >= 0.65 ? 'recurrent' : recurrence >= 0.4 ? 'mixed' : 'local';
+
+          return {
+            ...row,
+            relationship,
+            recurrence,
+            specificity,
+            strength,
+            rankCorr,
+            contrast,
+            contrastRaw,
+            highMean,
+            lowMean,
+            support,
+            role,
+            context
+          };
+        });
+    }
+
+    function joinTopLabels(rows){
+      const labels = rows.slice(0, 3).map(r => r.label);
+      return labels.length ? labels.join(', ') : 'None clear';
+    }
+
+    function summarizeTargetContext(target, interactions, opts){
+      const related = interactions.filter(r => Math.abs(r.relationship) >= 0.18 && r.strength >= 0.08);
+      const companions = related.filter(r => r.relationship > 0).sort((a,b)=>b.strength-a.strength);
+      const displaced = related.filter(r => r.relationship < 0).sort((a,b)=>b.strength-a.strength);
+      const strongest = [...related].sort((a,b)=>b.strength-a.strength).slice(0, 6);
+      const coherence = strongest.length ? meanOf(strongest.map(r => r.strength)) : 0;
+      const stableStrong = related.filter(r => r.recurrence >= 0.65 && r.strength >= 0.15);
+      const localStrong = related.filter(r => r.recurrence < 0.45 && r.strength >= 0.15);
+      const lowTarget = (target.mean || 0) < Math.max(0.15, opts.lowSignalCutoff);
+
+      let read = 'Mixed / ambiguous';
+      let note = 'Multiple explanations fit';
+      if(lowTarget){
+        read = 'Low target signal';
+        note = 'Noise-sensitive context';
+      } else if(related.length < 2){
+        read = 'Weak target context';
+        note = 'Few repeatable relationships';
+      } else if(stableStrong.length >= 3 && localStrong.length >= 2){
+        read = 'Layered context';
+        note = '2+ entry contexts plausible';
+      } else if(stableStrong.length >= 3){
+        read = 'One recurrent context';
+        note = 'Coherent companion/displacement field';
+      } else if(localStrong.length >= 2){
+        read = 'Local pulse context';
+        note = 'Sharp, less recurrent relationships';
       }
-      if(stats.coverage >= Math.ceil(stats.values.length * 0.65) && stats.residualShare < 0.25){
-        return {
-          shape: 'Broad diffuse',
-          compatible: 'Older or repeated signal',
-          note: 'Spread across many chromosomes'
-        };
-      }
-      if(stats.coverage <= 3){
-        return {
-          shape: 'Sparse signal',
-          compatible: 'Fragile pulse signal',
-          note: 'Few chromosomes carry detectable mass'
-        };
-      }
+
       return {
-        shape: 'Mixed / ambiguous',
-        compatible: 'Multiple explanations fit',
-        note: 'Needs comparison with context'
+        read,
+        note,
+        companions,
+        displaced,
+        coherence,
+        relatedCount: related.length
       };
     }
 
-    function analyzeTrackerRow(row, opts){
-      const values = row.nums.map(v => Number.isFinite(v) ? Math.max(0, v) : 0);
-      const labels = row.chromosomeLabels?.length === values.length
-        ? row.chromosomeLabels
-        : values.map((_v, i) => `Chr ${i + 1}`);
-      const baselineRaw = estimateTrackerBaseline(values, opts.trackerBaseline);
-      const baseline = Math.max(0, Math.min(Math.max(...values, 0), baselineRaw));
-      const residuals = values.map(v => Math.max(0, v - baseline));
-      const mean = Number.isFinite(row.mean) ? row.mean : meanOf(values);
-      const deviations = values.map(v => Math.abs(v - baseline));
-      const mad = median(deviations);
-      const noise = Math.max(mad, mean * 0.08, 0.05);
-      const threshold = baseline + opts.trackerResidualCutoff * noise;
-      const pulseFlags = values.map(v => v > threshold && v > baseline + EPS);
-      const pulseCount = pulseFlags.filter(Boolean).length;
-      const total = values.reduce((a,b)=>a+b,0);
-      const residualTotal = residuals.reduce((a,b)=>a+b,0);
-      const residualShare = total > EPS ? residualTotal / total : 0;
-      const coverageCutoff = Math.max(0.05, mean * 0.15);
-      const coverage = values.filter(v => v >= coverageCutoff).length;
-      const effectiveCount = effectiveChromosomeCount(values);
-      const stats = {
-        labels, values, residuals, pulseFlags, baseline, mean, threshold,
-        pulseCount, residualShare, coverage, effectiveCount
-      };
-      return {...stats, ...classifyTrackerShape(stats, row, opts)};
-    }
-
-    function renderTrackerSummary(row, stats){
+    function renderTrackerSummary(target, summary){
       const el = document.getElementById('trackerSummary');
       if(!el) return;
       const cells = [
-        ['Shape', stats.shape, stats.note],
-        ['Compatibility', stats.compatible, 'Exploratory'],
-        ['Mean', `${stats.mean.toFixed(2)}%`, `Spike ${row.spike.toFixed(2)}`],
-        ['Baseline', `${stats.baseline.toFixed(2)}%`, `Cutoff ${stats.threshold.toFixed(2)}%`],
-        ['Pulse chromosomes', String(stats.pulseCount), `${stats.coverage} covered`],
-        ['Residual share', `${(stats.residualShare * 100).toFixed(1)}%`, `Effective ${stats.effectiveCount.toFixed(1)}`]
+        ['Target context', summary.read, summary.note],
+        ['Companions', joinTopLabels(summary.companions), 'Rise with target'],
+        ['Displaced', joinTopLabels(summary.displaced), 'Fall where target rises'],
+        ['Coherence', `${(summary.coherence * 100).toFixed(0)}%`, `${summary.relatedCount} related populations`],
+        ['Target mean', `${(target.mean || 0).toFixed(2)}%`, `Pulse z ${(target.zPulse || 0).toFixed(2)}`],
+        ['Target stability', `${(target.zStability || 0).toFixed(2)} z`, `Residual ${(target.zResidualStability || 0).toFixed(2)} z`]
       ];
       el.innerHTML = cells.map(([label, value, note]) => `
         <div class="tracker-stat">
@@ -1222,80 +1297,105 @@
       }
 
       const opts = readPlotOptions();
-      const stats = analyzeTrackerRow(row, opts);
-      renderTrackerSummary(row, stats);
+      const interactions = analyzeTargetInteractions(row, rows, opts);
+      const summary = summarizeTargetContext(row, interactions, opts);
+      renderTrackerSummary(row, summary);
 
-      const barColors = stats.values.map((_v, i) => stats.pulseFlags[i] ? '#d94841' : '#2f7ed8');
-      const residualColors = stats.residuals.map((_v, i) => stats.pulseFlags[i] ? '#b4232d' : '#7aa7d9');
-      const lineX = stats.labels;
-      const meanLine = stats.labels.map(() => stats.mean);
-      const baselineLine = stats.labels.map(() => stats.baseline);
-      const thresholdLine = stats.labels.map(() => stats.threshold);
+      const relatedTop = new Set([...interactions].sort((a,b)=>b.strength-a.strength).slice(0, 12).map(r => r.label));
+      const labelMode = opts.trackerLabels || 'strong';
+      const labels = interactions.map(r => {
+        if(labelMode === 'none') return '';
+        if(labelMode === 'all') return r.label;
+        return relatedTop.has(r.label) && r.strength >= 0.08 ? r.label : '';
+      });
+      const means = interactions.map(r => Math.max(r.mean || 0, 0.01));
+      const ownPulse = interactions.map(r => Number.isFinite(r.zPulse) ? r.zPulse : 0);
+      const colorRange = Math.max(1, ...ownPulse.map(v => Math.abs(v)));
+      const maxMean = Math.max(...means, 1);
+      const sizeref = (2 * maxMean) / (38 ** 2);
+      const customData = interactions.map(r => [
+        r.role,
+        r.context,
+        r.mean || 0,
+        r.relationship,
+        r.recurrence,
+        r.strength,
+        r.rankCorr,
+        r.contrast,
+        r.highMean,
+        r.lowMean,
+        r.zPulse || 0,
+        r.zStability || 0
+      ]);
 
-      const traces = [
-        {
-          type: 'bar',
-          x: stats.labels,
-          y: stats.values,
-          name: 'Chromosome value',
-          marker: {color: barColors},
-          hovertemplate: '%{x}<br>Value: %{y:.2f}%<extra></extra>'
+      const trace = {
+        type: 'scatter',
+        mode: 'markers+text',
+        x: interactions.map(r => r.relationship),
+        y: interactions.map(r => r.recurrence),
+        text: labels,
+        hovertext: interactions.map(r => r.label),
+        textposition: 'top center',
+        cliponaxis: false,
+        customdata: customData,
+        marker: {
+          size: means,
+          sizemode: 'area',
+          sizeref,
+          sizemin: 7,
+          opacity: interactions.map(r => Math.max(0.35, 0.45 + r.strength * 0.55)),
+          line: {width: 1.4, color: 'rgba(30,30,35,.7)'},
+          color: ownPulse,
+          cmin: -colorRange,
+          cmax: colorRange,
+          colorscale: [
+            [0, 'rgb(0, 85, 255)'],
+            [0.5, 'rgb(35, 35, 40)'],
+            [1, 'rgb(220, 45, 45)']
+          ],
+          colorbar: {
+            title: {text: 'Own pulse z'},
+            ticks: 'outside',
+            len: .78
+          }
         },
-        {
-          type: 'scatter',
-          mode: 'lines',
-          x: lineX,
-          y: meanLine,
-          name: 'Mean',
-          line: {color: '#1f1f24', width: 2}
-        },
-        {
-          type: 'scatter',
-          mode: 'lines',
-          x: lineX,
-          y: baselineLine,
-          name: 'Baseline',
-          line: {color: '#198754', width: 2, dash: 'dash'}
-        },
-        {
-          type: 'scatter',
-          mode: 'lines',
-          x: lineX,
-          y: thresholdLine,
-          name: 'Pulse cutoff',
-          line: {color: '#dc3545', width: 1.5, dash: 'dot'}
-        },
-        {
-          type: 'bar',
-          x: stats.labels,
-          y: stats.residuals,
-          xaxis: 'x2',
-          yaxis: 'y2',
-          name: 'Above baseline',
-          marker: {color: residualColors},
-          hovertemplate: '%{x}<br>Above baseline: %{y:.2f}%<extra></extra>'
-        }
-      ];
+        hovertemplate:
+          '<b>%{customdata[0]}: %{hovertext}</b><br>' +
+          'Relationship: %{x:.3f}<br>' +
+          'Recurrence: %{y:.3f}<br>' +
+          'Strength: %{customdata[5]:.3f}<br>' +
+          'Context: %{customdata[1]}<br>' +
+          '<br>Mean: %{customdata[2]:.2f}%<br>' +
+          'Rank association: %{customdata[6]:.3f}<br>' +
+          'High-target contrast: %{customdata[7]:.3f}<br>' +
+          'Mean on target-high chromosomes: %{customdata[8]:.2f}%<br>' +
+          'Mean on target-low chromosomes: %{customdata[9]:.2f}%<br>' +
+          'Own Pulse Score: %{customdata[10]:.3f}<br>' +
+          'Own Stability Score: %{customdata[11]:.3f}<extra></extra>'
+      };
 
-      const maxTop = Math.max(...stats.values, stats.mean, stats.threshold, 1);
-      const maxResidual = Math.max(...stats.residuals, 1);
       const layout = {
         title: {
-          text: `Tracked Population: ${escapeHtml(row.label)}<br><sup>${escapeHtml(stats.shape)} - ${escapeHtml(stats.compatible)}</sup>`
+          text: `Target Interaction Map: ${escapeHtml(row.label)}<br><sup>${escapeHtml(summary.read)} - ${escapeHtml(summary.note)}</sup>`
         },
-        barmode: 'overlay',
-        bargap: 0.18,
-        xaxis: {domain: [0, 1], anchor: 'y', tickangle: 0},
-        yaxis: {title: 'Chromosome %', domain: [0.42, 1], range: [0, maxTop * 1.18], rangemode: 'tozero'},
-        xaxis2: {domain: [0, 1], anchor: 'y2', matches: 'x', title: 'Chromosome'},
-        yaxis2: {title: 'Above baseline', domain: [0, 0.28], range: [0, maxResidual * 1.25], rangemode: 'tozero'},
-        legend: {orientation: 'h', y: 1.08, x: 0},
-        margin: {l:70, r:40, t:100, b:80},
+        xaxis: {title: 'Displacement <- Target relationship -> Companion', range: [-1, 1], zeroline: false, mirror: true, automargin: true},
+        yaxis: {title: 'Local/unstable -> Recurrent/stable', range: [-0.02, 1.02], zeroline: false, mirror: true, automargin: true},
+        shapes: [
+          {type: 'line', x0: 0, x1: 0, y0: 0, y1: 1, line: {width: 1, dash: 'dot'}},
+          {type: 'line', x0: -1, x1: 1, y0: 0.5, y1: 0.5, line: {width: 1, dash: 'dot'}}
+        ],
+        annotations: [
+          {xref:'paper', yref:'paper', x:.18, y:.9, text:'recurrent displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.9, text:'recurrent companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.18, y:.13, text:'local displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.13, text:'local companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}}
+        ],
+        margin: {l:80, r:105, t:95, b:80},
         hovermode: 'closest',
         uirevision: 'population-tracker'
       };
 
-      Plotly.react(plotEl, traces, layout, {
+      Plotly.react(plotEl, [trace], layout, {
         responsive: true,
         displaylogo: false,
         modeBarButtonsToRemove: ['select2d','lasso2d'],
@@ -1519,8 +1619,7 @@
           topMeanLimit: 0,
           showHints: false,
           trackerPopulation: '',
-          trackerBaseline: 'lowerMedian',
-          trackerResidualCutoff: 1.25
+          trackerLabels: 'strong'
         }
       };
     }
@@ -1548,8 +1647,7 @@
           topMeanLimit: Number.isFinite(plot.topMeanLimit) ? plot.topMeanLimit : defaults.plot.topMeanLimit,
           showHints: !!plot.showHints,
           trackerPopulation: typeof plot.trackerPopulation === 'string' ? plot.trackerPopulation : defaults.plot.trackerPopulation,
-          trackerBaseline: ['lowerMedian', 'median', 'trimmedMean'].includes(plot.trackerBaseline) ? plot.trackerBaseline : defaults.plot.trackerBaseline,
-          trackerResidualCutoff: Number.isFinite(plot.trackerResidualCutoff) ? Math.max(0, plot.trackerResidualCutoff) : defaults.plot.trackerResidualCutoff
+          trackerLabels: ['strong', 'all', 'none'].includes(plot.trackerLabels) ? plot.trackerLabels : defaults.plot.trackerLabels
         }
       };
     }
@@ -1574,8 +1672,7 @@
       setInputValue('minMeanFilter', plot.minMean);
       setInputValue('topMeanLimit', plot.topMeanLimit);
       setChecked('showPlotHints', plot.showHints);
-      setInputValue('trackerBaseline', plot.trackerBaseline);
-      setInputValue('trackerResidualCutoff', plot.trackerResidualCutoff);
+      setInputValue('trackerLabels', plot.trackerLabels);
       const trackerSelect = document.getElementById('trackerPopulation');
       if(trackerSelect) trackerSelect.dataset.pendingValue = plot.trackerPopulation || '';
     }
@@ -2208,7 +2305,7 @@
           if(e.key === 'Escape') closeWorkspacePassphrase(null);
         });
       });
-      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints','trackerPopulation','trackerBaseline','trackerResidualCutoff'].forEach(id => {
+      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints','trackerPopulation','trackerLabels'].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
         el.addEventListener('change', () => { if(lastParsed) renderVisualAnalysis(lastParsed); });
