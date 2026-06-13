@@ -200,9 +200,17 @@
                 <option value="none">None</option>
               </select>
             </div>
+            <div class="col-sm-6 col-lg-2">
+              <label class="form-label fw-semibold" for="trackerMinMean">Min mean</label>
+              <div class="input-group input-group-sm">
+                <input id="trackerMinMean" type="number" class="form-control" value="0" min="0" step="0.1" />
+                <span class="input-group-text">%</span>
+              </div>
+            </div>
           </div>
           <div id="trackerSummary" class="tracker-summary mb-3"></div>
           <div id="populationPlot" style="width:100%;height:640px"></div>
+          <div class="form-text">Rightward populations tend to be higher where the target is higher; leftward populations tend to be lower where the target is higher. Higher points show a more recurrent target-conditioned pattern. Larger markers have stronger target-conditioned relationships. Fill color shows intrinsic source character: blue is diffuse/deep, gray is mixed, and amber is pulsed/local.</div>
         </div>
       </div>
     </div>
@@ -233,8 +241,22 @@
       <h6 class="mt-4">Visual Modes</h6>
       <ul>
         <li><strong>Overview</strong>: plots all populations against Pulse and Stability or Residual Stability.</li>
-        <li><strong>Population</strong>: uses one population as the target lens and maps the rest of the populations by target-conditioned companion/displacement behavior versus their own diffuse-to-pulsed source character.</li>
+        <li><strong>Population</strong>: uses one population as the target lens and maps the rest of the populations by target association versus target-pattern recurrence.</li>
       </ul>
+      <p>
+        In Population mode, <strong>Target association</strong> compares each
+        other population against the selected target across chromosomes. Positive
+        values mean the population tends to be higher where the target is higher;
+        negative values mean it tends to be lower where the target is higher.
+        This is an association pattern, not a literal replacement claim.
+        <strong>Target-pattern recurrence</strong> asks how consistently that
+        relationship repeats on target-informative chromosomes. Marker size
+        shows target-conditioned relationship strength. Fill color shows
+        <strong>intrinsic source character</strong>, reusing the first-mode
+        scores to distinguish pulsed/local, diffuse/deep, and mixed profiles.
+        The Population Min mean filter hides low-signal populations from this
+        map.
+      </p>
 
       <h6 class="mt-4">Workspace Files</h6>
       <p>
@@ -982,7 +1004,8 @@
         topMeanLimit: Math.max(0, Math.floor(readNum('topMeanLimit', 0))),
         showHints: !!document.getElementById('showPlotHints')?.checked,
         trackerPopulation: document.getElementById('trackerPopulation')?.value || document.getElementById('trackerPopulation')?.dataset.pendingValue || '',
-        trackerLabels: document.getElementById('trackerLabels')?.value || 'strong'
+        trackerLabels: document.getElementById('trackerLabels')?.value || 'strong',
+        trackerMinMean: Math.max(0, readNum('trackerMinMean', 0))
       };
     }
 
@@ -1198,7 +1221,7 @@
           const contrastZ = Math.abs(contrastRaw) / (popSd + EPS);
           const specificity = clamp(contrastZ / 2, 0, 1);
           const strength = clamp(Math.abs(relationship) * ((0.55 * recurrence) + (0.45 * specificity)), 0, 1);
-          const role = relationship > 0.15 ? 'Companion' : relationship < -0.15 ? 'Displaced' : 'Weak relation';
+          const role = relationship > 0.15 ? 'Travels with target' : relationship < -0.15 ? 'Opposes target' : 'Weak relation';
           const context = recurrence >= 0.65 ? 'recurrent' : recurrence >= 0.4 ? 'mixed' : 'local';
           const sourceCharacter = sourceCharacterScore(row);
           const sourceLabel = sourceCharacter >= 0.75 ? 'pulsed / local'
@@ -1232,8 +1255,8 @@
 
     function summarizeTargetContext(target, interactions, opts){
       const related = interactions.filter(r => Math.abs(r.relationship) >= 0.18 && r.strength >= 0.08);
-      const companions = related.filter(r => r.relationship > 0).sort((a,b)=>b.strength-a.strength);
-      const displaced = related.filter(r => r.relationship < 0).sort((a,b)=>b.strength-a.strength);
+      const traveling = related.filter(r => r.relationship > 0).sort((a,b)=>b.strength-a.strength);
+      const opposing = related.filter(r => r.relationship < 0).sort((a,b)=>b.strength-a.strength);
       const strongest = [...related].sort((a,b)=>b.strength-a.strength).slice(0, 6);
       const coherence = strongest.length ? meanOf(strongest.map(r => r.strength)) : 0;
       const pulsedStrong = related.filter(r => r.sourceCharacter >= 0.75 && r.strength >= 0.15);
@@ -1266,8 +1289,8 @@
       return {
         read,
         note,
-        companions,
-        displaced,
+        traveling,
+        opposing,
         coherence,
         relatedCount: related.length,
         pulsedCount: pulsedStrong.length,
@@ -1280,8 +1303,8 @@
       if(!el) return;
       const cells = [
         ['Target context', summary.read, summary.note],
-        ['Companions', joinTopLabels(summary.companions), 'Rise with target'],
-        ['Displaced', joinTopLabels(summary.displaced), 'Fall where target rises'],
+        ['Travels with target', joinTopLabels(summary.traveling), 'Higher where target is higher'],
+        ['Opposes target', joinTopLabels(summary.opposing), 'Lower where target is higher'],
         ['Coherence', `${(summary.coherence * 100).toFixed(0)}%`, `${summary.relatedCount} related populations`],
         ['Source mix', `${summary.diffuseCount} diffuse / ${summary.pulsedCount} pulsed`, 'Among strongest ties'],
         ['Target mean', `${(target.mean || 0).toFixed(2)}%`, `Pulse z ${(target.zPulse || 0).toFixed(2)}`],
@@ -1318,9 +1341,30 @@
       }
 
       const opts = readPlotOptions();
-      const interactions = analyzeTargetInteractions(row, rows, opts);
+      const allInteractions = analyzeTargetInteractions(row, rows, opts);
+      const interactions = allInteractions.filter(r => (r.mean || 0) >= opts.trackerMinMean);
       const summary = summarizeTargetContext(row, interactions, opts);
       renderTrackerSummary(row, summary);
+
+      if(interactions.length === 0){
+        Plotly.react(plotEl, [], {
+          title: {
+            text: `Target Interaction Map: ${escapeHtml(row.label)}<br><sup>No populations match the current Population filters</sup>`
+          },
+          xaxis: {visible:false},
+          yaxis: {visible:false},
+          annotations: [{
+            text: `No populations have Mean >= ${(opts.trackerMinMean || 0).toFixed(1)}%`,
+            x:.5,
+            y:.5,
+            xref:'paper',
+            yref:'paper',
+            showarrow:false
+          }],
+          margin: {l:80, r:105, t:95, b:80}
+        }, {responsive:true, displaylogo:false});
+        return;
+      }
 
       const relatedTop = new Set([...interactions].sort((a,b)=>b.strength-a.strength).slice(0, 12).map(r => r.label));
       const labelMode = opts.trackerLabels || 'strong';
@@ -1329,9 +1373,9 @@
         if(labelMode === 'all') return r.label;
         return relatedTop.has(r.label) && r.strength >= 0.08 ? r.label : '';
       });
-      const means = interactions.map(r => Math.max(r.mean || 0, 0.01));
-      const maxMean = Math.max(...means, 1);
-      const sizeref = (2 * maxMean) / (38 ** 2);
+      const strengthSizes = interactions.map(r => Math.max(r.strength || 0, 0.04));
+      const maxStrengthSize = Math.max(...strengthSizes, 0.25);
+      const sizeref = (2 * maxStrengthSize) / (38 ** 2);
       const customData = interactions.map(r => [
         r.role,
         r.context,
@@ -1348,42 +1392,54 @@
         r.sourceCharacter,
         r.sourceLabel
       ]);
-      const markerColors = interactions.map(r => {
+      const markerLines = interactions.map(r => {
         if(r.relationship > 0.15) return '#c9473d';
         if(r.relationship < -0.15) return '#2f6fb2';
         return '#8b8f98';
       });
-      const markerLines = interactions.map(r => {
-        if(r.recurrence >= 0.65) return '#14161a';
-        if(r.recurrence >= 0.4) return '#5c636a';
-        return '#b8bdc5';
-      });
+      const sourceColors = interactions.map(r => r.sourceCharacter || 0);
+      const sourceRange = Math.max(1, ...sourceColors.map(v => Math.abs(v)));
 
       const trace = {
         type: 'scatter',
         mode: 'markers+text',
         x: interactions.map(r => r.relationship),
-        y: interactions.map(r => r.sourceCharacter),
+        y: interactions.map(r => r.recurrence),
         text: labels,
         hovertext: interactions.map(r => r.label),
         textposition: 'top center',
         cliponaxis: false,
         customdata: customData,
         marker: {
-          size: means,
+          size: strengthSizes,
           sizemode: 'area',
           sizeref,
           sizemin: 7,
           opacity: interactions.map(r => Math.max(0.35, 0.45 + r.strength * 0.55)),
-          line: {width: interactions.map(r => 1 + r.recurrence * 2.6), color: markerLines},
-          color: markerColors
+          line: {width: interactions.map(r => r.strength >= 0.2 ? 1.8 : 1), color: markerLines},
+          color: sourceColors,
+          cmin: -sourceRange,
+          cmax: sourceRange,
+          colorscale: [
+            [0, '#4776a9'],
+            [0.5, '#8b8f98'],
+            [1, '#c58a35']
+          ],
+          colorbar: {
+            title: {text: 'Source character'},
+            tickmode: 'array',
+            tickvals: [-sourceRange, 0, sourceRange],
+            ticktext: ['Diffuse', 'Mixed', 'Pulsed'],
+            len: .78
+          },
+          symbol: 'circle'
         },
         hovertemplate:
           '<b>%{customdata[0]}: %{hovertext}</b><br>' +
           'Relationship: %{x:.3f}<br>' +
-          'Source character: %{y:.3f} (%{customdata[13]})<br>' +
+          'Target-pattern recurrence: %{y:.3f} (%{customdata[1]})<br>' +
           'Strength: %{customdata[5]:.3f}<br>' +
-          'Relationship recurrence: %{customdata[4]:.3f} (%{customdata[1]})<br>' +
+          'Source character: %{customdata[12]:.3f} (%{customdata[13]})<br>' +
           '<br>Mean: %{customdata[2]:.2f}%<br>' +
           'Rank association: %{customdata[6]:.3f}<br>' +
           'High-target contrast: %{customdata[7]:.3f}<br>' +
@@ -1397,18 +1453,35 @@
         title: {
           text: `Target Interaction Map: ${escapeHtml(row.label)}<br><sup>${escapeHtml(summary.read)} - ${escapeHtml(summary.note)}</sup>`
         },
-        xaxis: {title: 'Displacement <- Target relationship -> Companion', range: [-1, 1], zeroline: false, mirror: true, automargin: true},
-        yaxis: {title: 'Diffuse / deep <- Source character -> Pulsed / local', range: [-3.05, 3.05], zeroline: false, mirror: true, automargin: true},
+        xaxis: {
+          title: 'Target association',
+          range: [-1, 1],
+          zeroline: false,
+          mirror: true,
+          automargin: true,
+          tickmode: 'array',
+          tickvals: [-1, 0, 1],
+          ticktext: ['Opposes target', 'Neutral', 'Travels with target']
+        },
+        yaxis: {
+          title: 'Target-pattern recurrence',
+          range: [-0.02, 1.02],
+          zeroline: false,
+          mirror: true,
+          automargin: true,
+          tickmode: 'array',
+          tickvals: [0, 0.5, 1],
+          ticktext: ['Local / weak', 'Mixed', 'Recurrent']
+        },
         shapes: [
-          {type: 'line', x0: 0, x1: 0, y0: -3, y1: 3, line: {width: 1, dash: 'dot'}},
-          {type: 'line', x0: -1, x1: 1, y0: 0, y1: 0, line: {width: 1, dash: 'dot'}}
+          {type: 'line', x0: 0, x1: 0, y0: 0, y1: 1, line: {width: 1, dash: 'dot'}},
+          {type: 'line', x0: -1, x1: 1, y0: 0.5, y1: 0.5, line: {width: 1, dash: 'dot'}}
         ],
         annotations: [
-          {xref:'paper', yref:'paper', x:.18, y:.9, text:'pulsed displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.82, y:.9, text:'pulsed companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.18, y:.13, text:'diffuse displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.82, y:.13, text:'diffuse companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.5, y:-.12, text:'red = companion, blue = displaced, gray = weak; darker outline = more recurrent', showarrow:false, font:{size:11, color:'rgba(70,70,75,.7)'}}
+          {xref:'paper', yref:'paper', x:.18, y:.9, text:'recurrent opposing', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.9, text:'recurrent traveling-with', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.18, y:.13, text:'local opposing', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.13, text:'local traveling-with', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}}
         ],
         margin: {l:80, r:105, t:95, b:80},
         hovermode: 'closest',
@@ -1639,7 +1712,8 @@
           topMeanLimit: 0,
           showHints: false,
           trackerPopulation: '',
-          trackerLabels: 'strong'
+          trackerLabels: 'strong',
+          trackerMinMean: 0
         }
       };
     }
@@ -1667,7 +1741,8 @@
           topMeanLimit: Number.isFinite(plot.topMeanLimit) ? plot.topMeanLimit : defaults.plot.topMeanLimit,
           showHints: !!plot.showHints,
           trackerPopulation: typeof plot.trackerPopulation === 'string' ? plot.trackerPopulation : defaults.plot.trackerPopulation,
-          trackerLabels: ['strong', 'all', 'none'].includes(plot.trackerLabels) ? plot.trackerLabels : defaults.plot.trackerLabels
+          trackerLabels: ['strong', 'all', 'none'].includes(plot.trackerLabels) ? plot.trackerLabels : defaults.plot.trackerLabels,
+          trackerMinMean: Number.isFinite(plot.trackerMinMean) ? Math.max(0, plot.trackerMinMean) : defaults.plot.trackerMinMean
         }
       };
     }
@@ -1693,6 +1768,7 @@
       setInputValue('topMeanLimit', plot.topMeanLimit);
       setChecked('showPlotHints', plot.showHints);
       setInputValue('trackerLabels', plot.trackerLabels);
+      setInputValue('trackerMinMean', plot.trackerMinMean);
       const trackerSelect = document.getElementById('trackerPopulation');
       if(trackerSelect) trackerSelect.dataset.pendingValue = plot.trackerPopulation || '';
     }
@@ -2325,7 +2401,7 @@
           if(e.key === 'Escape') closeWorkspacePassphrase(null);
         });
       });
-      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints','trackerPopulation','trackerLabels'].forEach(id => {
+      ['plotYAxis','plotLabels','lowSignalCutoff','minMeanFilter','topMeanLimit','showPlotHints','trackerPopulation','trackerLabels','trackerMinMean'].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
         el.addEventListener('change', () => { if(lastParsed) renderVisualAnalysis(lastParsed); });
