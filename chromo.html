@@ -233,7 +233,7 @@
       <h6 class="mt-4">Visual Modes</h6>
       <ul>
         <li><strong>Overview</strong>: plots all populations against Pulse and Stability or Residual Stability.</li>
-        <li><strong>Population</strong>: uses one population as the target lens and maps the rest of the populations by whether they move with it, move against it, and recur consistently in that target-conditioned context.</li>
+        <li><strong>Population</strong>: uses one population as the target lens and maps the rest of the populations by target-conditioned companion/displacement behavior versus their own diffuse-to-pulsed source character.</li>
       </ul>
 
       <h6 class="mt-4">Workspace Files</h6>
@@ -1147,6 +1147,14 @@
       return meanOf(idxs.map(i => values[i]).filter(Number.isFinite));
     }
 
+    function sourceCharacterScore(row){
+      const pulse = Number.isFinite(row.zPulse) ? row.zPulse : 0;
+      const stability = Number.isFinite(row.zStability) ? row.zStability : 0;
+      const residual = Number.isFinite(row.zResidualStability) ? row.zResidualStability : stability;
+      const sparsity = Number.isFinite(row.zSparsity) ? row.zSparsity : 0;
+      return clamp((0.55 * pulse) + (0.2 * sparsity) - (0.15 * stability) - (0.1 * residual), -3, 3);
+    }
+
     function analyzeTargetInteractions(target, rows, opts){
       const targetValues = target.nums.map(v => Number.isFinite(v) ? Math.max(0, v) : 0);
       const n = targetValues.length;
@@ -1192,6 +1200,10 @@
           const strength = clamp(Math.abs(relationship) * ((0.55 * recurrence) + (0.45 * specificity)), 0, 1);
           const role = relationship > 0.15 ? 'Companion' : relationship < -0.15 ? 'Displaced' : 'Weak relation';
           const context = recurrence >= 0.65 ? 'recurrent' : recurrence >= 0.4 ? 'mixed' : 'local';
+          const sourceCharacter = sourceCharacterScore(row);
+          const sourceLabel = sourceCharacter >= 0.75 ? 'pulsed / local'
+            : sourceCharacter <= -0.75 ? 'diffuse / deep'
+            : 'mixed source';
 
           return {
             ...row,
@@ -1206,7 +1218,9 @@
             lowMean,
             support,
             role,
-            context
+            context,
+            sourceCharacter,
+            sourceLabel
           };
         });
     }
@@ -1222,8 +1236,9 @@
       const displaced = related.filter(r => r.relationship < 0).sort((a,b)=>b.strength-a.strength);
       const strongest = [...related].sort((a,b)=>b.strength-a.strength).slice(0, 6);
       const coherence = strongest.length ? meanOf(strongest.map(r => r.strength)) : 0;
-      const stableStrong = related.filter(r => r.recurrence >= 0.65 && r.strength >= 0.15);
-      const localStrong = related.filter(r => r.recurrence < 0.45 && r.strength >= 0.15);
+      const pulsedStrong = related.filter(r => r.sourceCharacter >= 0.75 && r.strength >= 0.15);
+      const diffuseStrong = related.filter(r => r.sourceCharacter <= -0.75 && r.strength >= 0.15);
+      const mixedStrong = related.filter(r => Math.abs(r.sourceCharacter) < 0.75 && r.strength >= 0.15);
       const lowTarget = (target.mean || 0) < Math.max(0.15, opts.lowSignalCutoff);
 
       let read = 'Mixed / ambiguous';
@@ -1234,15 +1249,18 @@
       } else if(related.length < 2){
         read = 'Weak target context';
         note = 'Few repeatable relationships';
-      } else if(stableStrong.length >= 3 && localStrong.length >= 2){
+      } else if(pulsedStrong.length >= 2 && diffuseStrong.length >= 2){
         read = 'Layered context';
-        note = '2+ entry contexts plausible';
-      } else if(stableStrong.length >= 3){
-        read = 'One recurrent context';
-        note = 'Coherent companion/displacement field';
-      } else if(localStrong.length >= 2){
+        note = 'Deep layer plus pulsed signal';
+      } else if(pulsedStrong.length >= 3){
         read = 'Local pulse context';
-        note = 'Sharp, less recurrent relationships';
+        note = 'Target tied to pulsed sources';
+      } else if(diffuseStrong.length >= 3){
+        read = 'Diffuse layer context';
+        note = 'Target tied to broad sources';
+      } else if(mixedStrong.length >= 3){
+        read = 'Mixed source context';
+        note = 'Target relationships are not temporally sharp';
       }
 
       return {
@@ -1251,7 +1269,9 @@
         companions,
         displaced,
         coherence,
-        relatedCount: related.length
+        relatedCount: related.length,
+        pulsedCount: pulsedStrong.length,
+        diffuseCount: diffuseStrong.length
       };
     }
 
@@ -1263,6 +1283,7 @@
         ['Companions', joinTopLabels(summary.companions), 'Rise with target'],
         ['Displaced', joinTopLabels(summary.displaced), 'Fall where target rises'],
         ['Coherence', `${(summary.coherence * 100).toFixed(0)}%`, `${summary.relatedCount} related populations`],
+        ['Source mix', `${summary.diffuseCount} diffuse / ${summary.pulsedCount} pulsed`, 'Among strongest ties'],
         ['Target mean', `${(target.mean || 0).toFixed(2)}%`, `Pulse z ${(target.zPulse || 0).toFixed(2)}`],
         ['Target stability', `${(target.zStability || 0).toFixed(2)} z`, `Residual ${(target.zResidualStability || 0).toFixed(2)} z`]
       ];
@@ -1309,8 +1330,6 @@
         return relatedTop.has(r.label) && r.strength >= 0.08 ? r.label : '';
       });
       const means = interactions.map(r => Math.max(r.mean || 0, 0.01));
-      const ownPulse = interactions.map(r => Number.isFinite(r.zPulse) ? r.zPulse : 0);
-      const colorRange = Math.max(1, ...ownPulse.map(v => Math.abs(v)));
       const maxMean = Math.max(...means, 1);
       const sizeref = (2 * maxMean) / (38 ** 2);
       const customData = interactions.map(r => [
@@ -1325,14 +1344,26 @@
         r.highMean,
         r.lowMean,
         r.zPulse || 0,
-        r.zStability || 0
+        r.zStability || 0,
+        r.sourceCharacter,
+        r.sourceLabel
       ]);
+      const markerColors = interactions.map(r => {
+        if(r.relationship > 0.15) return '#c9473d';
+        if(r.relationship < -0.15) return '#2f6fb2';
+        return '#8b8f98';
+      });
+      const markerLines = interactions.map(r => {
+        if(r.recurrence >= 0.65) return '#14161a';
+        if(r.recurrence >= 0.4) return '#5c636a';
+        return '#b8bdc5';
+      });
 
       const trace = {
         type: 'scatter',
         mode: 'markers+text',
         x: interactions.map(r => r.relationship),
-        y: interactions.map(r => r.recurrence),
+        y: interactions.map(r => r.sourceCharacter),
         text: labels,
         hovertext: interactions.map(r => r.label),
         textposition: 'top center',
@@ -1344,27 +1375,15 @@
           sizeref,
           sizemin: 7,
           opacity: interactions.map(r => Math.max(0.35, 0.45 + r.strength * 0.55)),
-          line: {width: 1.4, color: 'rgba(30,30,35,.7)'},
-          color: ownPulse,
-          cmin: -colorRange,
-          cmax: colorRange,
-          colorscale: [
-            [0, 'rgb(0, 85, 255)'],
-            [0.5, 'rgb(35, 35, 40)'],
-            [1, 'rgb(220, 45, 45)']
-          ],
-          colorbar: {
-            title: {text: 'Own pulse z'},
-            ticks: 'outside',
-            len: .78
-          }
+          line: {width: interactions.map(r => 1 + r.recurrence * 2.6), color: markerLines},
+          color: markerColors
         },
         hovertemplate:
           '<b>%{customdata[0]}: %{hovertext}</b><br>' +
           'Relationship: %{x:.3f}<br>' +
-          'Recurrence: %{y:.3f}<br>' +
+          'Source character: %{y:.3f} (%{customdata[13]})<br>' +
           'Strength: %{customdata[5]:.3f}<br>' +
-          'Context: %{customdata[1]}<br>' +
+          'Relationship recurrence: %{customdata[4]:.3f} (%{customdata[1]})<br>' +
           '<br>Mean: %{customdata[2]:.2f}%<br>' +
           'Rank association: %{customdata[6]:.3f}<br>' +
           'High-target contrast: %{customdata[7]:.3f}<br>' +
@@ -1379,16 +1398,17 @@
           text: `Target Interaction Map: ${escapeHtml(row.label)}<br><sup>${escapeHtml(summary.read)} - ${escapeHtml(summary.note)}</sup>`
         },
         xaxis: {title: 'Displacement <- Target relationship -> Companion', range: [-1, 1], zeroline: false, mirror: true, automargin: true},
-        yaxis: {title: 'Local/unstable -> Recurrent/stable', range: [-0.02, 1.02], zeroline: false, mirror: true, automargin: true},
+        yaxis: {title: 'Diffuse / deep <- Source character -> Pulsed / local', range: [-3.05, 3.05], zeroline: false, mirror: true, automargin: true},
         shapes: [
-          {type: 'line', x0: 0, x1: 0, y0: 0, y1: 1, line: {width: 1, dash: 'dot'}},
-          {type: 'line', x0: -1, x1: 1, y0: 0.5, y1: 0.5, line: {width: 1, dash: 'dot'}}
+          {type: 'line', x0: 0, x1: 0, y0: -3, y1: 3, line: {width: 1, dash: 'dot'}},
+          {type: 'line', x0: -1, x1: 1, y0: 0, y1: 0, line: {width: 1, dash: 'dot'}}
         ],
         annotations: [
-          {xref:'paper', yref:'paper', x:.18, y:.9, text:'recurrent displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.82, y:.9, text:'recurrent companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.18, y:.13, text:'local displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
-          {xref:'paper', yref:'paper', x:.82, y:.13, text:'local companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}}
+          {xref:'paper', yref:'paper', x:.18, y:.9, text:'pulsed displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.9, text:'pulsed companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.18, y:.13, text:'diffuse displaced', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.82, y:.13, text:'diffuse companions', showarrow:false, font:{size:11, color:'rgba(90,90,90,.45)'}},
+          {xref:'paper', yref:'paper', x:.5, y:-.12, text:'red = companion, blue = displaced, gray = weak; darker outline = more recurrent', showarrow:false, font:{size:11, color:'rgba(70,70,75,.7)'}}
         ],
         margin: {l:80, r:105, t:95, b:80},
         hovermode: 'closest',
